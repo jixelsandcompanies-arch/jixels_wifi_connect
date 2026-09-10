@@ -1,7 +1,8 @@
 import { supabase } from '../../lib/supabase.js';
+import { requireAdmin } from '../../lib/admin-auth.js';
 const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString();
 export default async function handler(req,res) {
-  if (req.headers['x-admin-key'] !== process.env.ADMIN_API_KEY) return res.status(401).json({error:'Unauthorized'});
+  if (!await requireAdmin(req, res)) return;
   const db=supabase(), now=new Date(), today=midnight(now), week=new Date(now-6*864e5).toISOString(), month=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
   const [active,expired,packages,sessions,payments]=await Promise.all([
     db.from('wifi_sessions').select('phone',{count:'exact',head:true}).eq('session_status','ACTIVE'), db.from('wifi_sessions').select('id',{count:'exact',head:true}).eq('session_status','EXPIRED'), db.from('wifi_packages').select('*').order('display_order'), db.from('wifi_sessions').select('phone,start_time,expiry_time,session_status,wifi_packages(name)').order('start_time',{ascending:false}).limit(50), db.from('payments').select('amount_kes,created_at,package_id,status,wifi_packages(name)').eq('status','SUCCESS')
