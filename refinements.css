@@ -6,3 +6,7 @@ body, body * { font-family: Arial, Helvetica, sans-serif !important; font-style:
 
 /* Plain regular heading typography. */
 h1, h2, h3, h4, h5, h6 { font-family: Arial, Helvetica, sans-serif !important; font-style: normal !important; font-weight: 400 !important; letter-spacing: normal !important; text-transform: none !important; text-decoration: none !important; }
+
+/* Keep footer lettering plain and at normal text size. */
+footer b { font-size: 16px !important; font-weight: 400 !important; font-style: normal !important; letter-spacing: normal !important; text-transform: none !important; }
+footer small { font-size: 12px !important; font-weight: 400 !important; font-style: normal !important; letter-spacing: normal !important; text-transform: none !important; }
