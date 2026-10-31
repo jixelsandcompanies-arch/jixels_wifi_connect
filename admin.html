@@ -1,1 +1,95 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jixels Admin Portal</title><link rel="stylesheet" href="admin.css"><link rel="stylesheet" href="admin-login.css"></head><body><aside><div class="admin-brand"><b>Jixels</b><small>Rural Wi-Fi · ADMIN</small></div><nav aria-label="Admin navigation"><a class="active" href="#overview">Overview</a><a href="#packagesSection">Wi-Fi Packages</a><a href="#sessionsSection">Customer Sessions</a><a href="#revenueSection">Payments & Revenue</a></nav><button id="logout" class="logout" type="button">Sign out</button></aside><main id="overview"><header><div><small>DASHBOARD / WI-FI MANAGEMENT</small><h1>Admin overview</h1><p>Monitor sales, manage internet packages and review customer sessions.</p></div><button id="add" type="button">+ Add package</button></header><h2 class="group-title">Business summary</h2><section id="metrics" class="metrics" aria-live="polite"><div class="metric">Loading dashboard…</div></section><section id="packagesSection" class="panel"><div class="section-title"><div><h2>Wi-Fi packages</h2><p>Manage prices, durations and availability. Changes appear in the customer portal immediately.</p></div><span id="packageTotal"></span></div><div id="packages" class="packages"><p>Loading packages…</p></div></section><section class="grid"><section id="sessionsSection" class="panel"><div class="section-title"><div><h2>Customer sessions</h2><p>Most recent access and session status.</p></div><span class="live">● LIVE</span></div><div id="sessions">Loading sessions…</div></section><section id="revenueSection" class="panel"><h2>Payment revenue</h2><p>Confirmed M-Pesa payments only.</p><div id="revenue"></div><h3>Sales by package</h3><div id="breakdown"></div></section></section></main><dialog id="editor"><form id="form"><div class="modal-title"><h2 id="title">Add package</h2><button type="button" id="cancel" aria-label="Close">×</button></div><input id="id" type="hidden"><label>Package name<input id="name" required></label><label>Price (KSh)<input id="price_kes" type="number" min="1" required></label><label>Duration<input id="duration" type="number" min="1" required></label><label>Duration unit<select id="unit"><option value="1">Minutes</option><option value="60" selected>Hours</option><option value="1440">Days</option></select></label><label>Description<input id="description" required></label><label>Display order<input id="display_order" type="number" min="0" required></label><p class="toggles"><label><input id="is_active" type="checkbox" checked> Active</label><label><input id="is_popular" type="checkbox"> Popular</label><label><input id="is_best_value" type="checkbox"> Best value</label></p><button type="submit">Save changes</button><p id="error" role="alert"></p></form></dialog><div id="toast" role="status"></div><script src="admin.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101d35">
+  <title>Jixels Wi-Fi Admin</title>
+  <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="admin-login.css">
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#overview" aria-label="Jixels Admin home">
+        <span class="brand-mark" aria-hidden="true">J</span>
+        <span><b>Jixels</b><small>WI-FI ADMIN</small></span>
+      </a>
+      <nav class="side-nav" aria-label="Admin navigation">
+        <a class="nav-link active" href="#overview"><span aria-hidden="true">⌂</span>Overview</a>
+        <a class="nav-link" href="#packagesSection"><span aria-hidden="true">◫</span>Packages</a>
+        <a class="nav-link" href="#sessionsSection"><span aria-hidden="true">◉</span>Sessions</a>
+        <a class="nav-link" href="#revenueSection"><span aria-hidden="true">▤</span>Payments &amp; revenue</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="network-label"><span class="online-dot"></span><span><b>Barrio- HOTSPOT</b><small>Wi-Fi network</small></span></div>
+        <button id="logout" class="logout" type="button">Sign out</button>
+      </div>
+    </aside>
+    <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
+
+    <main id="overview" class="main-content">
+      <header class="topbar">
+        <button id="menuToggle" class="menu-toggle" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><span></span><span></span><span></span></button>
+        <div class="page-heading"><small>BUSINESS MANAGEMENT</small><h1>Overview</h1><p>Monitor your hotspot, manage packages and review payments.</p></div>
+        <button id="refresh" class="button button-quiet" type="button"><span aria-hidden="true">↻</span> Refresh</button>
+      </header>
+
+      <section class="section-block" aria-labelledby="summaryTitle">
+        <div class="section-heading"><div><h2 id="summaryTitle">Business summary</h2><p>Live totals from your billing records.</p></div><span id="updatedAt" class="muted"></span></div>
+        <div id="metrics" class="metrics" aria-live="polite"><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div></div>
+      </section>
+
+      <section id="packagesSection" class="section-block card-section" aria-labelledby="packagesTitle">
+        <div class="section-heading section-heading-wrap">
+          <div><h2 id="packagesTitle">Wi-Fi packages</h2><p>Add plans, update prices and control what customers can buy.</p></div>
+          <button id="add" class="button button-primary" type="button"><span aria-hidden="true">＋</span> Add package</button>
+        </div>
+        <div class="toolbar">
+          <label class="search-box"><span aria-hidden="true">⌕</span><input id="packageSearch" type="search" placeholder="Search packages" aria-label="Search packages"></label>
+          <label class="filter-box"><span class="visually-hidden">Filter packages</span><select id="packageFilter"><option value="all">All packages</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+          <span id="packageTotal" class="result-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>Package</th><th>Price</th><th>Duration</th><th>Sales</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody id="packages"><tr><td colspan="6" class="table-message">Loading packages…</td></tr></tbody></table>
+        </div>
+      </section>
+
+      <div class="lower-grid">
+        <section id="sessionsSection" class="section-block card-section" aria-labelledby="sessionsTitle">
+          <div class="section-heading"><div><h2 id="sessionsTitle">Customer sessions</h2><p>Latest Wi-Fi access activity.</p></div><span class="live-pill"><span class="online-dot"></span>Live data</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Package</th><th>Started</th><th>Expires</th><th>Status</th></tr></thead><tbody id="sessions"><tr><td colspan="5" class="table-message">Loading sessions…</td></tr></tbody></table></div>
+          <p class="table-note">Showing the latest 50 sessions.</p>
+        </section>
+        <section id="revenueSection" class="section-block card-section" aria-labelledby="revenueTitle">
+          <div class="section-heading"><div><h2 id="revenueTitle">Payments &amp; revenue</h2><p>Confirmed M-Pesa payments only.</p></div></div>
+          <div id="revenue" class="revenue-list"><p class="table-message">Loading revenue…</p></div>
+          <h3 class="subheading">Sales by package</h3>
+          <div id="breakdown" class="breakdown-list"><p class="table-message">Loading package sales…</p></div>
+        </section>
+      </div>
+      <footer class="admin-footer">Jixels Wi-Fi billing <span>·</span> All times shown in East Africa Time</footer>
+    </main>
+  </div>
+
+  <dialog id="editor" class="editor-dialog">
+    <form id="form">
+      <div class="modal-title"><div><small>PACKAGE SETTINGS</small><h2 id="title">Add package</h2></div><button type="button" id="cancel" class="icon-button" aria-label="Close">×</button></div>
+      <input id="id" type="hidden">
+      <div class="form-grid">
+        <label class="field field-wide">Package name<input id="name" maxlength="80" autocomplete="off" placeholder="e.g. 2 Hours" required></label>
+        <label class="field">Price (KSh)<input id="price_kes" type="number" min="1" step="1" required></label>
+        <label class="field">Duration<input id="duration" type="number" min="1" step="1" required></label>
+        <label class="field field-wide">Duration unit<select id="unit"><option value="1">Minutes</option><option value="60" selected>Hours</option><option value="1440">Days</option></select></label>
+        <label class="field field-wide">Description<textarea id="description" rows="3" maxlength="240" placeholder="What customers receive with this plan" required></textarea></label>
+        <label class="field field-wide">Display order<input id="display_order" type="number" min="0" step="1" required><small>Lower numbers appear first in the customer portal.</small></label>
+      </div>
+      <fieldset class="package-options"><legend>Customer portal display</legend><label><input id="is_active" type="checkbox" checked><span><b>Available for sale</b><small>Customers can purchase this package.</small></span></label><label><input id="is_popular" type="checkbox"><span><b>Mark as popular</b><small>Show a popular label.</small></span></label><label><input id="is_best_value" type="checkbox"><span><b>Mark as best value</b><small>Highlight this package as best value.</small></span></label></fieldset>
+      <p id="error" class="form-error" role="alert"></p>
+      <div class="modal-actions"><button id="cancelBottom" class="button button-quiet" type="button">Cancel</button><button id="savePackage" class="button button-primary" type="submit">Save package</button></div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="admin.js"></script>
+</body>
+</html>

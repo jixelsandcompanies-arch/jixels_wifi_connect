@@ -4,7 +4,7 @@ Static customer portal and serverless M-Pesa billing application for Vercel. The
 
 ## Supabase and admin
 
-1. Create a Supabase project and run migrations `001_wifi_billing.sql` through `005_tyrax_local_agent.sql` in order. The first migration seeds the initial package catalogue; manage packages in `/admin.html` after setup.
+1. Create a Supabase project and run migrations `001_wifi_billing.sql` through `006_opennds_auth_ack.sql` in order. The first migration seeds the initial package catalogue; manage packages in `/admin.html` after setup.
 2. Add `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` as Vercel environment variables. Keep the service key server-side.
 3. Create the admin user in Supabase Authentication, then insert that user's UUID in `public.admin_profiles` (role `admin`). Admin sign in checks both Supabase authentication and this allowlist.
 4. Deploy/redeploy the project at `https://jixels-wifi-connect.vercel.app`.
@@ -25,7 +25,7 @@ Keep the Airtel unit as the 5G Internet source and add a separate gateway/access
 
 The application now includes an openNDS HTTPS FAS endpoint (`/api/opennds/fas`), validates the FAS level 4 gateway identity, binds checkout to the originating client, queues authorization only after the Daraja callback confirms the exact amount, and waits for authmon's signed acknowledgement before showing the client's session as active. openNDS enforces each purchased duration on the gateway; the scheduled job updates Supabase session records.
 
-For production, run migrations `001` to `005`, configure these Vercel environment variables, and redeploy:
+For production, run migrations `001` to `006`, configure these Vercel environment variables, and redeploy:
 
 * `OPENNDS_GATEWAY_NAME`: exact `gatewayname` configured in openNDS.
 * `OPENNDS_FAS_KEY`: long random secret, shared only between Vercel and openNDS.
