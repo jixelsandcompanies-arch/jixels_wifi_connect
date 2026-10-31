@@ -1,20 +1,30 @@
 import { supabase } from '../../lib/supabase.js';
-import { isGatewayConfigured } from '../../lib/gateway.js';
+import { isGatewayConfigured, isTyraxAgentMode, isTyraxAgentOnline } from '../../lib/gateway.js';
 import { createHash, randomBytes } from 'node:crypto';
 const mpesaBase = () => process.env.MPESA_ENV === 'production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
 async function accessToken() { const basic = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64'); const r = await fetch(`${mpesaBase()}/oauth/v1/generate?grant_type=client_credentials`, { headers: { Authorization: `Basic ${basic}` } }); const data = await r.json(); if (!r.ok || !data.access_token) throw new Error('M-Pesa authentication failed'); return data.access_token; }
 const kenyaPhone = phone => String(phone || '').replace(/\D/g, '').replace(/^0/, '254');
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-  const { packageId, phone, portalToken, deviceCode = null } = req.body || {};
+  const { packageId, phone, portalToken, macAddress: submittedMac = null, deviceCode = null } = req.body || {};
   if (!process.env.MPESA_CONSUMER_KEY || !process.env.MPESA_CONSUMER_SECRET || !process.env.MPESA_SHORTCODE || !process.env.MPESA_PASSKEY || !process.env.MPESA_CALLBACK_URL) return res.status(503).json({ error: 'M-Pesa payments are not configured yet' });
   if (!isGatewayConfigured()) return res.status(503).json({ error: 'Wi-Fi access activation is not configured for this router yet. Please contact the Wi-Fi administrator.' });
-  if (!/^[a-f0-9]{64}$/.test(portalToken || '')) return res.status(400).json({ error: 'Connect through the hotspot portal before purchasing.' });
+  const tyraxAgentMode = isTyraxAgentMode();
+  if (tyraxAgentMode && !(await isTyraxAgentOnline())) return res.status(503).json({ error: 'The local Wi-Fi access service is offline. Please try again later.' });
+  if (!tyraxAgentMode && !/^[a-f0-9]{64}$/.test(portalToken || '')) return res.status(400).json({ error: 'Connect through the hotspot portal before purchasing.' });
   if (!/^(?:254(?:1|7)\d{8})$/.test(kenyaPhone(phone))) return res.status(400).json({ error: 'Enter a valid Kenyan M-Pesa phone number' });
   if (!packageId) return res.status(400).json({ error: 'Select an available Wi-Fi package' });
   const db = supabase();
-  const { data: context } = await db.from('opennds_portal_contexts').select('id,mac_address').eq('token_hash', createHash('sha256').update(portalToken).digest('hex')).gt('expires_at', new Date().toISOString()).is('consumed_at', null).maybeSingle();
-  if (!context) return res.status(400).json({ error: 'Hotspot session expired. Reconnect to the Wi-Fi and try again.' });
+  let context = null, normalizedMac = null;
+  if (tyraxAgentMode) {
+    if (!/^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i.test(submittedMac || '')) return res.status(400).json({ error: 'Enter the Wi-Fi MAC address for this device.' });
+    normalizedMac = submittedMac.toLowerCase().replaceAll('-', ':');
+  } else {
+    const result = await db.from('opennds_portal_contexts').select('id,mac_address').eq('token_hash', createHash('sha256').update(portalToken).digest('hex')).gt('expires_at', new Date().toISOString()).is('consumed_at', null).maybeSingle();
+    context = result.data;
+    if (!context) return res.status(400).json({ error: 'Hotspot session expired. Reconnect to the Wi-Fi and try again.' });
+    normalizedMac = context.mac_address;
+  }
   const { data: plan } = await db.from('wifi_packages').select('*').eq('id', packageId).eq('is_active', true).single();
   if (!plan) return res.status(400).json({ error: 'Selected package is unavailable' });
   let deviceId = null;
@@ -24,8 +34,8 @@ export default async function handler(req, res) {
   const r = await fetch(`${mpesaBase()}/mpesa/stkpush/v1/processrequest`, { method: 'POST', headers: { Authorization: `Bearer ${await accessToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ BusinessShortCode: process.env.MPESA_SHORTCODE, Password: password, Timestamp: timestamp, TransactionType: 'CustomerPayBillOnline', Amount: plan.price_kes, PartyA: kenyaPhone(phone), PartyB: process.env.MPESA_SHORTCODE, PhoneNumber: kenyaPhone(phone), CallBackURL: process.env.MPESA_CALLBACK_URL, AccountReference: `JIX-${plan.slug}`, TransactionDesc: plan.name }) });
   const mpesa = await r.json(); if (!r.ok || !mpesa.CheckoutRequestID) return res.status(502).json({ error: mpesa.errorMessage || 'Could not start M-Pesa payment' });
   const statusToken = randomBytes(32).toString('hex');
-  const { data: payment, error } = await db.from('payments').insert({ checkout_request_id: mpesa.CheckoutRequestID, phone: kenyaPhone(phone), package_id: plan.id, amount_kes: plan.price_kes, mac_address: context.mac_address, portal_context_id: context.id, status_token: statusToken, device_id: deviceId, status: 'PENDING' }).select('id').single();
+  const { data: payment, error } = await db.from('payments').insert({ checkout_request_id: mpesa.CheckoutRequestID, phone: kenyaPhone(phone), package_id: plan.id, amount_kes: plan.price_kes, mac_address: normalizedMac, portal_context_id: context?.id || null, status_token: statusToken, device_id: deviceId, status: 'PENDING' }).select('id').single();
   if (error) return res.status(500).json({ error: error.message });
-  await db.from('opennds_portal_contexts').update({ consumed_at: new Date().toISOString(), payment_id: payment.id }).eq('id', context.id);
+  if (context) await db.from('opennds_portal_contexts').update({ consumed_at: new Date().toISOString(), payment_id: payment.id }).eq('id', context.id);
   return res.status(202).json({ checkoutRequestId: mpesa.CheckoutRequestID, statusToken, status: 'PENDING' });
 }

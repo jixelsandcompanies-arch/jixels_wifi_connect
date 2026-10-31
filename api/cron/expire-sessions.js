@@ -1,11 +1,25 @@
 import { supabase } from '../../lib/supabase.js';
-import { queueOpenNdsAuth } from '../../lib/gateway.js';
+import { isTyraxAgentMode, queueOpenNdsAuth, queueTyraxRouterCommand } from '../../lib/gateway.js';
 /** openNDS enforces the purchased session length locally; this job updates billing records. */
 export default async function handler(req, res) {
   if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).end();
   const db = supabase(), now = new Date().toISOString();
-  const { data: sessions, error } = await db.from('wifi_sessions').select('id').in('session_status', ['ACTIVE','WAITING_GATEWAY']).lte('expiry_time', now);
+  const { data: sessions, error } = await db.from('wifi_sessions').select('id,session_status').in('session_status', ['ACTIVE','WAITING_GATEWAY']).lte('expiry_time', now);
   if (error) return res.status(500).json({ error: error.message });
+  if (isTyraxAgentMode()) {
+    for (const session of sessions) {
+      const { data } = await db.from('wifi_sessions').select('mac_address,payment_id,payments(wifi_packages(duration_minutes))').eq('id', session.id).single();
+      const payment = Array.isArray(data?.payments) ? data.payments[0] : data?.payments;
+      if (data?.mac_address) {
+        await queueTyraxRouterCommand({ sessionId: session.id, macAddress: data.mac_address, action: 'BLOCK', durationMinutes: payment?.wifi_packages?.duration_minutes || 1 });
+        if (session.session_status === 'WAITING_GATEWAY') {
+          await db.from('tyrax_router_commands').update({ status: 'CANCELLED', last_error: 'Authorization expired before the local agent applied it' }).eq('session_id', session.id).eq('action', 'ALLOW').eq('status', 'PENDING');
+          await db.from('wifi_sessions').update({ session_status: 'EXPIRED' }).eq('id', session.id).eq('session_status', 'WAITING_GATEWAY');
+        }
+      }
+    }
+    return res.json({ blockQueued: sessions.length });
+  }
   for (const session of sessions) await db.from('wifi_sessions').update({ session_status: 'EXPIRED' }).eq('id', session.id).in('session_status', ['ACTIVE','WAITING_GATEWAY']);
   const { data: stuck } = await db.from('wifi_sessions').select('id,payment_id').eq('session_status', 'GATEWAY_FAILED').gt('expiry_time', now).limit(50);
   let queued = 0;

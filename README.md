@@ -4,7 +4,7 @@ Static customer portal and serverless M-Pesa billing application for Vercel. The
 
 ## Supabase and admin
 
-1. Create a Supabase project and run migrations `001_wifi_billing.sql` through `004_opennds_gateway.sql` in order. The first migration seeds the initial package catalogue; manage packages in `/admin.html` after setup.
+1. Create a Supabase project and run migrations `001_wifi_billing.sql` through `005_tyrax_local_agent.sql` in order. The first migration seeds the initial package catalogue; manage packages in `/admin.html` after setup.
 2. Add `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` as Vercel environment variables. Keep the service key server-side.
 3. Create the admin user in Supabase Authentication, then insert that user's UUID in `public.admin_profiles` (role `admin`). Admin sign in checks both Supabase authentication and this allowlist.
 4. Deploy/redeploy the project at `https://jixels-wifi-connect.vercel.app`.
@@ -15,9 +15,9 @@ Configure `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPE
 
 ## Airtel 5G router captive portal
 
-The supplied router screenshots identify the interface as `TYRAX3004H` (the device label also shows `TYR300`). The Wi-Fi page uses personal WPA/WPA2 security. The visible **More Settings** list has firewall, QoS, port forwarding, website filter, static routes, dynamic DNS, and hardware NAT. The expanded **Management** menu has Time, System Log, System Admin, and Upgrade. None of the shown settings exposes a captive-portal option. The remaining place to check is **Wi-Fi → Advanced Settings** for a **Hotspot**, **Guest Portal**, **External Portal**, or **Portal Server** option. Only if that feature exists, set its landing/login URL to `https://jixels-wifi-connect.vercel.app` and configure its MAC query parameter as `client_mac`; the portal reads that parameter and forwards the device MAC with checkout. Do not substitute Website Filter or Port Forwarding; they do not provide captive-portal authentication. Do not expose router admin credentials in Vercel or the browser.
+The supplied router screenshots identify the interface as `TYRAX3004H` (the device label also shows `TYR300`). The Wi-Fi page uses personal WPA/WPA2 security. The visible **More Settings** list has firewall, QoS, port forwarding, website filter, static routes, dynamic DNS, and hardware NAT. The expanded **Management** menu has Time, System Log, System Admin, and Upgrade. None of the shown settings exposes a captive-portal option. The remaining place to check is **Wi-Fi â†’ Advanced Settings** for a **Hotspot**, **Guest Portal**, **External Portal**, or **Portal Server** option. Only if that feature exists, set its landing/login URL to `https://jixels-wifi-connect.vercel.app` and configure its MAC query parameter as `client_mac`; the portal reads that parameter and forwards the device MAC with checkout. Do not substitute Website Filter or Port Forwarding; they do not provide captive-portal authentication. Do not expose router admin credentials in Vercel or the browser.
 
-The Network Settings screenshot confirms the router's LAN admin address is `192.168.1.1` and DHCP leases range from `192.168.1.100` to `192.168.1.249`. The earlier `192.168.10.1` value is shown separately as the upstream Internet default gateway. Do not change the LAN or DHCP values to configure a captive portal. Router settings must be changed locally; a Vercel project cannot configure the private LAN device remotely. Public ZTE captive-portal instructions describe a remote portal plus RADIUS configuration for some ZTE ONTs, but do not confirm that Airtel's TYRAX3004H firmware offers the same feature ([example ZTE ONT guide](https://ajuda.wifeed.com.br/pt-BR/articles/15332192-manual-de-configuracao-ont-zte)). This repository does not include a fabricated gateway adapter. New checkout requests stay disabled until the router's documented API, RADIUS server, or compatible controller is integrated in `lib/gateway.js` and `isGatewayConfigured()` returns true. A landing-page URL alone does not enforce access or disconnect expired clients.
+The Network Settings screenshot confirms the router's LAN admin address is `192.168.1.1` and DHCP leases range from `192.168.1.100` to `192.168.1.249`. The earlier `192.168.10.1` value is shown separately as the upstream Internet default gateway. Do not change the LAN or DHCP values to configure a captive portal. Vercel cannot directly reach private LAN addresses; the TYRAX option below uses a local PC agent for router API calls. The visible router firmware has no captive-portal redirect, so its local agent can allow/block a paid device but cannot force the payment page to pop up.
 
 ## OpenNDS hotspot gateway
 
@@ -25,7 +25,7 @@ Keep the Airtel unit as the 5G Internet source and add a separate gateway/access
 
 The application now includes an openNDS HTTPS FAS endpoint (`/api/opennds/fas`), validates the FAS level 4 gateway identity, binds checkout to the originating client, queues authorization only after the Daraja callback confirms the exact amount, and waits for authmon's signed acknowledgement before showing the client's session as active. openNDS enforces each purchased duration on the gateway; the scheduled job updates Supabase session records.
 
-For production, run migrations `001` to `004`, configure these Vercel environment variables, and redeploy:
+For production, run migrations `001` to `005`, configure these Vercel environment variables, and redeploy:
 
 * `OPENNDS_GATEWAY_NAME`: exact `gatewayname` configured in openNDS.
 * `OPENNDS_FAS_KEY`: long random secret, shared only between Vercel and openNDS.
@@ -37,6 +37,21 @@ Configure openNDS for secure level 4, port 443, and path `/api/opennds/fas`, wit
 
 Reference: [openNDS HTTPS FAS documentation](https://github.com/openNDS/openNDS/blob/master/docs/source/fas.rst) and [official configuration options](https://github.com/openNDS/openNDS/blob/master/linux_openwrt/opennds/files/etc/config/opennds). Check the OpenWrt hardware support list for the exact gateway model before buying or flashing equipment.
 
+## Existing TYRAX router local agent
+
+The TYRAX3004H admin interface exposes a local device block/unblock API. To use it without putting the router password in Vercel, run the Windows PowerShell bridge in `tools/tyrax-agent.ps1` on a PC that stays powered on and connected to the same LAN as the router. This mode accepts the device Wi-Fi MAC in checkout, queues an allow command after confirmed M-Pesa payment, and blocks that MAC after its paid session expires.
+
+Run migration `005_tyrax_local_agent.sql`. In Vercel set `WIFI_GATEWAY_MODE=tyrax-agent` and `TYRAX_AGENT_TOKEN` to a fresh long random token. Generate one in Windows PowerShell with:
+
+```powershell
+$b = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+$AgentToken = [BitConverter]::ToString($b).Replace('-', '').ToLower()
+Set-Clipboard $AgentToken
+```
+
+Paste that token into Vercel, redeploy, then in PowerShell from this repository run `./tools/setup-tyrax-agent.ps1 -AgentToken $AgentToken` and `./tools/tyrax-agent.ps1`. The setup script prompts for the TYRAX admin password and stores it encrypted for that Windows account; the password is never sent to Vercel. The PC must remain online. This bridge provides device allow/block control, **not a captive portal**: customers must open the Jixels site themselves and enter the Wi-Fi MAC shown in their device settings. The router currently permits ordinary clients unless they are separately blocked, so this mode alone does not prevent unpaid devices from using Wi-Fi. Do not describe it as a full paywall until a default-deny policy and access to the payment site for blocked devices are configured and confirmed on the router.
+
 ## Expiry job
 
-`vercel.json` invokes `/api/cron/expire-sessions` every five minutes. Set a unique `CRON_SECRET`; openNDS enforces paid session timeouts locally and the job marks the corresponding billing records expired.
+`vercel.json` invokes `/api/cron/expire-sessions` every five minutes. Set a unique `CRON_SECRET`; openNDS enforces paid session timeouts locally. In TYRAX agent mode, the local agent also checks for expired sessions every eight seconds and blocks their MACs.

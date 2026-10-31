@@ -8,12 +8,13 @@ const fas = params.get('fas');
 if (fas) {
   history.replaceState({}, '', location.pathname);
   fetch('/api/opennds/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fas }) })
-    .then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.error || 'Hotspot session could not be verified'); portalToken = body.portalToken; })
+    .then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.error || 'Hotspot session could not be verified'); portalToken = body.portalToken; document.querySelector('#modalMacLabel').hidden = true; })
     .catch(error => { portalError = error.message; });
 }
 let portalError = null;
 function open(p) {
   selected = p;
+  document.querySelector('#modalMacLabel').hidden = Boolean(portalToken);
   document.querySelectorAll('.plan').forEach(card => card.classList.toggle('selected', card.dataset.packageId === p.id));
   document.querySelector('#modalName').textContent = p.name;
   document.querySelector('#modalPrice').textContent = fmt(p.price_kes);
@@ -39,12 +40,14 @@ load();
 document.querySelector('.close').onclick = () => modal.close();
 document.querySelector('#modalPay').onclick = async () => {
   const status = document.querySelector('#modalStatus');
-  if (portalError || !portalToken) { status.textContent = portalError || 'Connect to Jixels Wi-Fi to start a secure checkout.'; return; }
+  if (portalError) { status.textContent = portalError; return; }
   const phone = document.querySelector('#modalPhone').value.trim().replace(/[\s-]/g, '');
   if (!/^(?:0(?:1|7)\d{8}|254(?:1|7)\d{8})$/.test(phone)) { status.textContent = 'Enter a valid Kenyan M-Pesa number, starting with 01 or 07.'; return; }
+  const macAddress = document.querySelector('#modalMac').value.trim();
+  if (!portalToken && !/^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i.test(macAddress)) { status.textContent = 'Enter this device’s Wi-Fi MAC address to receive paid access.'; return; }
   status.textContent = 'Starting your M-Pesa request…';
   try {
-    const r = await fetch('/api/mpesa/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken }) });
+    const r = await fetch('/api/mpesa/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken, macAddress }) });
     const result = await r.json();
     if (!r.ok) throw new Error(result.error || 'Could not start payment.');
     status.textContent = 'Check your phone for the M-Pesa prompt. Approve it to activate your internet package.';

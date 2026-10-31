@@ -1,6 +1,6 @@
 import { supabase } from '../../lib/supabase.js';
 import { expiryFrom } from '../../lib/packages.js';
-import { queueOpenNdsAuth } from '../../lib/gateway.js';
+import { isTyraxAgentMode, queueOpenNdsAuth, queueTyraxRouterCommand } from '../../lib/gateway.js';
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const callback = req.body?.Body?.stkCallback; if (!callback?.CheckoutRequestID) return res.status(400).end();
@@ -25,11 +25,19 @@ export default async function handler(req, res) {
   }
   if (!session) return res.status(200).json({ ResultCode: 0, ResultDesc: 'Payment recorded; session creation will retry' });
   try {
-    const { data: context } = await db.from('opennds_portal_contexts').select('hid').eq('id', payment.portal_context_id).single();
-    const grant = await queueOpenNdsAuth({ sessionId: session.id, hid: context.hid, durationMinutes: payment.wifi_packages.duration_minutes });
+    let grant;
+    if (isTyraxAgentMode()) {
+      grant = await queueTyraxRouterCommand({ sessionId: session.id, macAddress: session.mac_address, action: 'ALLOW', durationMinutes: payment.wifi_packages.duration_minutes });
+      await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' }).eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
+    } else {
+      const { data: context } = await db.from('opennds_portal_contexts').select('hid').eq('id', payment.portal_context_id).single();
+      grant = await queueOpenNdsAuth({ sessionId: session.id, hid: context.hid, durationMinutes: payment.wifi_packages.duration_minutes });
+    }
     await db.from('wifi_sessions').update({ gateway_reference: grant.gatewayReference }).eq('id', session.id);
-    const { data: queued } = await db.from('opennds_auth_queue').select('status').eq('session_id', session.id).maybeSingle();
-    if (queued?.status === 'PENDING') await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' }).eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
+    if (!isTyraxAgentMode()) {
+      const { data: queued } = await db.from('opennds_auth_queue').select('status').eq('session_id', session.id).maybeSingle();
+      if (queued?.status === 'PENDING') await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' }).eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
+    }
   } catch { await db.from('wifi_sessions').update({ session_status: 'GATEWAY_FAILED' }).eq('id', session.id).eq('session_status', 'WAITING_GATEWAY'); }
   return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
 }
