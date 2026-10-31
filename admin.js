@@ -29,8 +29,17 @@ async function requestJson(url, options = {}) {
 }
 
 function showLogin() {
+  document.body.classList.remove('admin-authenticated');
   if ($('.login')) return;
-  document.body.insertAdjacentHTML('afterbegin', '<div class="login"><form id="loginForm"><b>Barrio- HOTSPOT</b><h1>Admin sign in</h1><p>Use your administrator account to manage this hotspot.</p><label>Email<input id="loginEmail" type="email" autocomplete="username" required></label><label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label><button id="loginSubmit" type="submit">Sign in</button><small id="loginError" role="alert"></small></form></div>');
+  document.body.insertAdjacentHTML('afterbegin', '<div class="login"><form id="loginForm"><b>Barrio- HOTSPOT</b><h1>Admin sign in</h1><p>Use your administrator account to manage this hotspot.</p><label>Email<input id="loginEmail" type="email" autocomplete="username" required></label><label>Password<div class="password-input"><input id="loginPassword" type="password" autocomplete="current-password" required><button id="togglePassword" type="button" aria-label="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m4 4 16 16"/></svg></button></div></label><button id="loginSubmit" type="submit">Sign in</button><small id="loginError" role="alert"></small></form></div>');
+  $('#togglePassword').onclick = () => {
+    const input = $('#loginPassword'), button = $('#togglePassword');
+    const reveal = input.type === 'password';
+    input.type = reveal ? 'text' : 'password';
+    button.classList.toggle('visible', reveal);
+    button.setAttribute('aria-label', `${reveal ? 'Hide' : 'Show'} password`);
+    button.setAttribute('aria-pressed', String(reveal));
+  };
   $('#loginForm').onsubmit = async event => {
     event.preventDefault();
     const submit = $('#loginSubmit'), error = $('#loginError');
@@ -105,6 +114,7 @@ function renderRevenue(revenue) {
 async function loadDashboard() {
   try {
     const data = await requestJson('/api/admin/dashboard', { headers: authHeaders(), cache: 'no-store' });
+    document.body.classList.add('admin-authenticated');
     catalogue = Array.isArray(data.packages) ? data.packages : [];
     breakdown = Array.isArray(data.breakdown) ? data.breakdown : [];
     renderMetrics(data.metrics || {});
@@ -114,6 +124,7 @@ async function loadDashboard() {
     $('#updatedAt').textContent = `Updated ${kenyaTime(new Date().toISOString())}`;
   } catch (exception) {
     if (!token) return;
+    document.body.classList.add('admin-authenticated');
     $('#metrics').innerHTML = `<div class="metric" role="alert"><small>Dashboard unavailable</small><b class="error">${escapeHtml(exception.message)}</b></div>`;
     $('#packages').innerHTML = `<tr><td colspan="6" class="table-message">${escapeHtml(exception.message)}</td></tr>`;
     $('#sessions').innerHTML = '<tr><td colspan="5" class="table-message">Dashboard data could not be loaded.</td></tr>';
