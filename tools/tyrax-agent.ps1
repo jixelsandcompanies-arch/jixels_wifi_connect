@@ -3,14 +3,15 @@ $ProgressPreference = 'SilentlyContinue'
 $configPath = Join-Path $env:LOCALAPPDATA 'JixelsTyraxAgent\agent.json'
 if (-not (Test-Path -LiteralPath $configPath)) { throw 'Agent not configured. Run setup-tyrax-agent.ps1 first.' }
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-$securePassword = ConvertTo-SecureString $config.routerPasswordDpapi
-$routerPassword = [System.Net.NetworkCredential]::new('', $securePassword).Password
+$credential = Import-Clixml -LiteralPath $config.credentialPath
+if ($credential -isnot [System.Management.Automation.PSCredential]) { throw 'Saved router credential is invalid. Rerun setup-tyrax-agent.ps1.' }
+$routerPassword = $credential.GetNetworkCredential().Password
 $routerRoot = "$($config.routerUrl)/cgi-bin/luci/admin/routerweb"
 $apiHeaders = @{ Authorization = "Bearer $($config.agentToken)" }
 $routerSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
 function Connect-Tyrax {
-  $body = @{ username = $config.routerUsername; password = $routerPassword } | ConvertTo-Json -Compress
+  $body = @{ username = $credential.UserName; password = $routerPassword } | ConvertTo-Json -Compress
   $result = Invoke-RestMethod -Uri "$routerRoot/login" -Method Post -ContentType 'application/json' -Body $body -WebSession $routerSession -TimeoutSec 12
   if ($result.result -ne 0) { throw 'TYRAX router login failed. Check the locally saved password.' }
 }
