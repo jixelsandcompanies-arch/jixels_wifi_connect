@@ -7,8 +7,13 @@ export default async function handler(req, res) {
   const db = supabase(), id = callback.CheckoutRequestID, ok = callback.ResultCode === 0;
   const { data: payment } = await db.from('payments').select('*, wifi_packages(*)').eq('checkout_request_id', id).single();
   if (!payment) return res.status(200).json({ ResultCode: 0, ResultDesc: 'Unknown checkout ignored' });
+  if (payment.status !== 'PENDING') return res.status(200).json({ ResultCode: 0, ResultDesc: 'Payment is already finalized' });
   if (!ok) { await db.from('payments').update({ status: 'FAILED', raw_callback: req.body }).eq('id', payment.id).eq('status', 'PENDING'); return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' }); }
-  const items = callback.CallbackMetadata?.Item || [], receipt = items.find(x => x.Name === 'MpesaReceiptNumber')?.Value;
+  const items = callback.CallbackMetadata?.Item || [], receipt = items.find(x => x.Name === 'MpesaReceiptNumber')?.Value, amount = items.find(x => x.Name === 'Amount')?.Value;
+  if (!receipt || Number(amount) !== Number(payment.amount_kes)) {
+    await db.from('payments').update({ status: 'FAILED', raw_callback: req.body }).eq('id', payment.id).eq('status', 'PENDING');
+    return res.status(200).json({ ResultCode: 0, ResultDesc: 'Payment details did not match' });
+  }
   // The unique constraints on receipt and payment_id make callback retries idempotent.
   const { data: already } = await db.from('wifi_sessions').select('id').eq('payment_id', payment.id).maybeSingle();
   if (already) return res.status(200).json({ ResultCode: 0, ResultDesc: 'Already processed' });
