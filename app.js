@@ -6,12 +6,24 @@ let selected, portalToken = null, portalError = null, portalReady = Promise.reso
 
 const params = new URLSearchParams(location.search);
 const fas = params.get('fas');
+const mikrotikPortal = params.get('gateway') === 'mikrotik';
 if (fas) {
   history.replaceState({}, '', location.pathname);
   portalReady = fetch('/api/opennds/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fas }) })
     .then(async response => {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Hotspot session could not be verified.');
+      portalToken = result.portalToken;
+    })
+    .catch(error => { portalError = error.message; });
+} else if (mikrotikPortal) {
+  const clientMac = params.get('clientmac');
+  const clientIp = params.get('clientip');
+  history.replaceState({}, '', location.pathname);
+  portalReady = fetch('/api/mikrotik/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientMac, clientIp }) })
+    .then(async response => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'The MikroTik hotspot could not verify this device.');
       portalToken = result.portalToken;
     })
     .catch(error => { portalError = error.message; });
@@ -83,10 +95,22 @@ document.querySelector('#modalPay').onclick = async () => {
     const deadline = Date.now() + 5 * 60_000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 3000));
-      const check = await fetch(`/api/opennds/status?token=${encodeURIComponent(result.statusToken)}`, { cache: 'no-store' });
+      const check = await fetch(`/api/payments/status?token=${encodeURIComponent(result.statusToken)}`, { cache: 'no-store' });
       if (!check.ok) continue;
       const state = await check.json();
       if (state.status === 'FAILED') { status.textContent = 'Payment was not completed. You can try again.'; break; }
+      if (state.status === 'SUCCESS' && state.session === 'ACTIVE' && state.mikrotikLogin) {
+        status.textContent = 'Payment confirmed. Signing this device in to the hotspot...';
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = state.mikrotikLogin.url;
+        for (const [name, value] of Object.entries({ username: state.mikrotikLogin.username, password: state.mikrotikLogin.password, dst: `${location.origin}/?connected=1` })) {
+          const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; form.append(input);
+        }
+        document.body.append(form);
+        form.submit();
+        break;
+      }
       if (state.status === 'SUCCESS' && state.session === 'ACTIVE') { status.textContent = 'Payment confirmed. Your Wi-Fi is now active.'; break; }
       if (state.status === 'SUCCESS' && state.session === 'GATEWAY_FAILED') { status.textContent = 'Payment was received, but this hotspot could not activate your device. Contact the Wi-Fi administrator with your payment message.'; break; }
       if (state.status === 'SUCCESS') status.textContent = 'Payment confirmed. Connecting your device to Wi-Fi...';

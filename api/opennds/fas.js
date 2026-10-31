@@ -1,7 +1,7 @@
-import { handleOpenNdsAuthGet, isGatewayConfigured, parseFas } from '../../lib/gateway.js';
+import { handleOpenNdsAuthGet, isGatewayConfigured, isOpenNdsMode, parseFas } from '../../lib/gateway.js';
 
 export default async function handler(req, res) {
-  if (!isGatewayConfigured()) return res.status(503).send('Hotspot gateway is not configured');
+  if (!isOpenNdsMode() || !isGatewayConfigured()) return res.status(503).send('openNDS gateway is not configured');
   if (req.method !== 'GET') return res.status(405).end();
   if (req.query?.auth_get) {
     try { res.setHeader('Content-Type', 'text/plain; charset=utf-8'); return res.status(200).send(await handleOpenNdsAuthGet(req.query)); }

@@ -1,0 +1,37 @@
+import { timingSafeEqual } from 'node:crypto';
+import { supabase } from '../../lib/supabase.js';
+import { isGatewayConfigured, isMikrotikAgentMode } from '../../lib/gateway.js';
+
+function authorized(req) {
+  const expected = process.env.MIKROTIK_AGENT_TOKEN || '';
+  const provided = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!expected || Buffer.byteLength(expected) !== Buffer.byteLength(provided)) return false;
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+}
+
+export default async function handler(req, res) {
+  if (!isMikrotikAgentMode() || !isGatewayConfigured() || !authorized(req)) return res.status(401).json({ error: 'Unauthorized MikroTik agent' });
+  const db = supabase();
+  if (req.method === 'GET') {
+    const { error: heartbeatError } = await db.from('mikrotik_agent_status').upsert({ id: 1, last_seen_at: new Date().toISOString() }, { onConflict: 'id' });
+    if (heartbeatError) return res.status(500).json({ error: 'Could not record MikroTik agent heartbeat' });
+    const { data, error } = await db.from('mikrotik_router_commands').select('id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,hotspot_password,attempts').eq('status', 'PENDING').order('created_at').limit(20);
+    if (error) return res.status(500).json({ error: 'Could not load MikroTik commands' });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({ commands: data });
+  }
+  if (req.method === 'POST') {
+    const { commandId, ok, message = '' } = req.body || {};
+    if (!/^[0-9a-f-]{36}$/i.test(commandId || '') || typeof ok !== 'boolean') return res.status(400).json({ error: 'Invalid command acknowledgement' });
+    const { data: command, error } = await db.from('mikrotik_router_commands').select('id,attempts').eq('id', commandId).eq('status', 'PENDING').maybeSingle();
+    if (error || !command) return res.status(404).json({ error: 'Pending MikroTik command not found' });
+    if (!ok) {
+      await db.from('mikrotik_router_commands').update({ attempts: command.attempts + 1, last_error: String(message).slice(0, 500) }).eq('id', command.id).eq('status', 'PENDING');
+      return res.status(202).json({ received: true, retry: true });
+    }
+    const { data: completed, error: completionError } = await db.rpc('complete_mikrotik_router_command', { p_command_id: command.id });
+    if (completionError || !completed) return res.status(500).json({ error: 'Could not finish MikroTik command; it will retry' });
+    return res.status(200).json({ received: true });
+  }
+  return res.status(405).end();
+}

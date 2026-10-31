@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase.js';
-import { isGatewayConfigured, isTyraxAgentMode } from '../../lib/gateway.js';
+import { isGatewayConfigured, isMikrotikAgentMode, isMikrotikAgentOnline, isTyraxAgentMode } from '../../lib/gateway.js';
 import { createHash, randomBytes } from 'node:crypto';
 
 const cloudPayBase = () => process.env.CLOUDPAY_ENV === 'production'
@@ -23,13 +23,16 @@ export default async function handler(req, res) {
   if (!process.env.CLOUDPAY_CONSUMER_KEY || !process.env.CLOUDPAY_CONSUMER_SECRET || !process.env.CLOUDPAY_WEBHOOK_SECRET) return res.status(503).json({ error: 'CloudPay is not configured yet. Contact the Wi-Fi administrator.' });
   if (!isGatewayConfigured()) return res.status(503).json({ error: 'Wi-Fi access activation is not configured for this router yet. Please contact the Wi-Fi administrator.' });
   if (isTyraxAgentMode()) return res.status(503).json({ error: 'Phone-only device identification requires the openNDS captive portal. The TYRAX router agent cannot identify a device from a phone number.' });
+  if (isMikrotikAgentMode() && !(await isMikrotikAgentOnline())) return res.status(503).json({ error: 'The MikroTik access agent is offline. Please try again later.' });
   if (!/^[a-f0-9]{64}$/.test(portalToken || '')) return res.status(400).json({ error: 'Join the hotspot and open its captive portal before purchasing. The connected device is identified automatically.' });
   if (!/^(?:254(?:1|7)\d{8})$/.test(kenyaPhone(phone))) return res.status(400).json({ error: 'Enter a valid Kenyan M-Pesa phone number' });
   if (!packageId) return res.status(400).json({ error: 'Select an available Wi-Fi package' });
 
   const db = supabase();
   const tokenHash = createHash('sha256').update(portalToken).digest('hex');
-  const { data: context } = await db.from('opennds_portal_contexts').select('id,mac_address').eq('token_hash', tokenHash).gt('expires_at', new Date().toISOString()).is('consumed_at', null).maybeSingle();
+  const contextTable = isMikrotikAgentMode() ? 'mikrotik_portal_contexts' : 'opennds_portal_contexts';
+  const contextFields = isMikrotikAgentMode() ? 'id,mac_address,client_ip,gateway_id' : 'id,mac_address';
+  const { data: context } = await db.from(contextTable).select(contextFields).eq('token_hash', tokenHash).gt('expires_at', new Date().toISOString()).is('consumed_at', null).maybeSingle();
   if (!context) return res.status(400).json({ error: 'Hotspot session expired. Reconnect to the Wi-Fi and try again.' });
   const { data: plan } = await db.from('wifi_packages').select('*').eq('id', packageId).eq('is_active', true).single();
   if (!plan) return res.status(400).json({ error: 'Selected package is unavailable' });
@@ -46,9 +49,11 @@ export default async function handler(req, res) {
     const reference = result.data?.reference || result.reference;
     if (!response.ok || result.status !== 'success' || !reference) return res.status(502).json({ error: result.message || 'CloudPay could not start the M-Pesa prompt.' });
 
-    const { data: payment, error } = await db.from('payments').insert({ checkout_request_id: reference, phone: kenyaPhone(phone), package_id: plan.id, amount_kes: plan.price_kes, mac_address: context.mac_address, portal_context_id: context.id, status_token: statusToken, status: 'PENDING' }).select('id').single();
+    const paymentRow = { checkout_request_id: reference, phone: kenyaPhone(phone), package_id: plan.id, amount_kes: plan.price_kes, mac_address: context.mac_address, status_token: statusToken, status: 'PENDING' };
+    paymentRow[isMikrotikAgentMode() ? 'mikrotik_portal_context_id' : 'portal_context_id'] = context.id;
+    const { data: payment, error } = await db.from('payments').insert(paymentRow).select('id').single();
     if (error) return res.status(500).json({ error: 'Payment started but the billing record could not be saved. Contact the Wi-Fi administrator before retrying.' });
-    await db.from('opennds_portal_contexts').update({ consumed_at: new Date().toISOString(), payment_id: payment.id }).eq('id', context.id);
+    await db.from(contextTable).update({ consumed_at: new Date().toISOString(), payment_id: payment.id }).eq('id', context.id);
     return res.status(202).json({ checkoutRequestId: reference, statusToken, status: 'PENDING' });
   } catch (error) {
     return res.status(502).json({ error: error.message || 'Could not connect to CloudPay.' });

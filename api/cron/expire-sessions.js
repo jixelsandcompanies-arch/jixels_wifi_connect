@@ -1,6 +1,6 @@
 import { supabase } from '../../lib/supabase.js';
-import { isTyraxAgentMode, queueOpenNdsAuth, queueTyraxRouterCommand } from '../../lib/gateway.js';
-/** openNDS enforces the purchased session length locally; this job updates billing records. */
+import { isMikrotikAgentMode, isTyraxAgentMode, queueMikrotikRouterCommand, queueOpenNdsAuth, queueTyraxRouterCommand } from '../../lib/gateway.js';
+/** Gateways enforce paid session limits; this job records expiry and queues device cleanup. */
 export default async function handler(req, res) {
   if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).end();
   const db = supabase(), now = new Date().toISOString();
@@ -19,6 +19,30 @@ export default async function handler(req, res) {
       }
     }
     return res.json({ blockQueued: sessions.length });
+  }
+  if (isMikrotikAgentMode()) {
+    for (const session of sessions) {
+      const { data: wifiSession } = await db.from('wifi_sessions').select('payment_id').eq('id', session.id).single();
+      const { data: payment } = await db.from('payments').select('mikrotik_portal_context_id,wifi_packages(duration_minutes)').eq('id', wifiSession?.payment_id).maybeSingle();
+      const { data: context } = await db.from('mikrotik_portal_contexts').select('gateway_id,mac_address,client_ip').eq('id', payment?.mikrotik_portal_context_id).maybeSingle();
+      if (!payment || !context) continue;
+      await queueMikrotikRouterCommand({ sessionId: session.id, gatewayId: context.gateway_id, macAddress: context.mac_address, clientIp: context.client_ip, action: 'BLOCK', durationMinutes: payment.wifi_packages?.duration_minutes || 1 });
+      await db.from('mikrotik_router_commands').update({ status: 'CANCELLED', last_error: 'Session expired before device authorization' }).eq('session_id', session.id).eq('action', 'ALLOW').eq('status', 'PENDING');
+      await db.from('wifi_sessions').update({ session_status: 'EXPIRED' }).eq('id', session.id).in('session_status', ['ACTIVE','WAITING_GATEWAY']);
+    }
+    const { data: stuck } = await db.from('wifi_sessions').select('id,payment_id').eq('session_status', 'GATEWAY_FAILED').gt('expiry_time', now).limit(50);
+    let retried = 0;
+    for (const session of stuck || []) {
+      const { data: payment } = await db.from('payments').select('mikrotik_portal_context_id,wifi_packages(duration_minutes)').eq('id', session.payment_id).maybeSingle();
+      const { data: context } = await db.from('mikrotik_portal_contexts').select('gateway_id,mac_address,client_ip').eq('id', payment?.mikrotik_portal_context_id).maybeSingle();
+      if (!payment || !context) continue;
+      try {
+        await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' }).eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
+        await queueMikrotikRouterCommand({ sessionId: session.id, gatewayId: context.gateway_id, macAddress: context.mac_address, clientIp: context.client_ip, action: 'ALLOW', durationMinutes: payment.wifi_packages.duration_minutes });
+        retried++;
+      } catch { /* retry on the next scheduled run */ }
+    }
+    return res.json({ expired: sessions.length, retried });
   }
   for (const session of sessions) await db.from('wifi_sessions').update({ session_status: 'EXPIRED' }).eq('id', session.id).in('session_status', ['ACTIVE','WAITING_GATEWAY']);
   const { data: stuck } = await db.from('wifi_sessions').select('id,payment_id').eq('session_status', 'GATEWAY_FAILED').gt('expiry_time', now).limit(50);

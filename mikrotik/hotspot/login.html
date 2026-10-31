@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store">
+  <title>Barrio- HOTSPOT</title>
+</head>
+<body>
+  <p>Opening Barrio- HOTSPOT billing...</p>
+  <p><a id="portalLink" href="https://jixels-wifi-connect.vercel.app/">Continue to packages</a></p>
+  <script>
+    const portal = new URL('https://jixels-wifi-connect.vercel.app/');
+    portal.searchParams.set('gateway', 'mikrotik');
+    portal.searchParams.set('clientmac', '$(mac)');
+    portal.searchParams.set('clientip', '$(ip)');
+    document.querySelector('#portalLink').href = portal.href;
+    location.replace(portal.href);
+  </script>
+</body>
+</html>

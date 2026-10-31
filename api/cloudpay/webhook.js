@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { supabase } from '../../lib/supabase.js';
 import { expiryFrom } from '../../lib/packages.js';
-import { queueOpenNdsAuth } from '../../lib/gateway.js';
+import { isMikrotikAgentMode, queueMikrotikRouterCommand, queueOpenNdsAuth } from '../../lib/gateway.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -24,12 +24,24 @@ async function activate(db, payment, payload) {
     if (error) session = (await db.from('wifi_sessions').select('*').eq('payment_id', payment.id).maybeSingle()).data;
     else session = data;
   }
-  if (!session || session.session_status === 'ACTIVE') return;
+  if (!session || ['ACTIVE', 'EXPIRED', 'REVOKED'].includes(session.session_status)) return;
+  if (session.session_status === 'GATEWAY_FAILED') {
+    await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' }).eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
+    session.session_status = 'WAITING_GATEWAY';
+  }
 
   try {
-    const { data: context } = await db.from('opennds_portal_contexts').select('hid').eq('id', payment.portal_context_id).single();
-    if (!context) throw new Error('Missing hotspot gateway context');
-    const grant = await queueOpenNdsAuth({ sessionId: session.id, hid: context.hid, durationMinutes: payment.wifi_packages.duration_minutes });
+    let grant;
+    if (payment.mikrotik_portal_context_id) {
+      if (!isMikrotikAgentMode()) throw new Error('MikroTik agent mode is not configured');
+      const { data: context } = await db.from('mikrotik_portal_contexts').select('gateway_id,mac_address,client_ip').eq('id', payment.mikrotik_portal_context_id).single();
+      if (!context) throw new Error('Missing MikroTik hotspot context');
+      grant = await queueMikrotikRouterCommand({ sessionId: session.id, gatewayId: context.gateway_id, macAddress: context.mac_address, clientIp: context.client_ip, action: 'ALLOW', durationMinutes: payment.wifi_packages.duration_minutes });
+    } else {
+      const { data: context } = await db.from('opennds_portal_contexts').select('hid').eq('id', payment.portal_context_id).single();
+      if (!context) throw new Error('Missing openNDS gateway context');
+      grant = await queueOpenNdsAuth({ sessionId: session.id, hid: context.hid, durationMinutes: payment.wifi_packages.duration_minutes });
+    }
     await db.from('wifi_sessions').update({ gateway_reference: grant.gatewayReference }).eq('id', session.id);
   } catch {
     await db.from('wifi_sessions').update({ session_status: 'GATEWAY_FAILED' }).eq('id', session.id).eq('session_status', 'WAITING_GATEWAY');
@@ -55,7 +67,7 @@ export default async function handler(req, res) {
 
   const db = supabase();
   const { data: payment } = await db.from('payments').select('*, wifi_packages(*)').eq('checkout_request_id', event.reference).maybeSingle();
-  if (!payment) return res.status(200).send('Unknown payment ignored');
+  if (!payment) return res.status(503).send('Payment record not ready; retry webhook');
   if (payment.status === 'FAILED') return res.status(200).send('Already processed');
 
   if (event.status !== 'COMPLETED') {

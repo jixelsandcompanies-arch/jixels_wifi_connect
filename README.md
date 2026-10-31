@@ -4,7 +4,7 @@ Responsive customer portal and serverless Wi-Fi billing application for Vercel. 
 
 ## Supabase and admin
 
-1. Create a Supabase project and run migrations `001_wifi_billing.sql` through `006_opennds_auth_ack.sql` in order. The first migration seeds the initial package catalogue; manage packages in `/admin.html` after setup.
+1. Create a Supabase project and run migrations `001_wifi_billing.sql` through `007_mikrotik_gateway.sql` in order. The first migration seeds the initial package catalogue; manage packages in `/admin.html` after setup.
 2. Add `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` as Vercel environment variables. Keep the service key server-side.
 3. Create the admin user in Supabase Authentication, then insert that user's UUID in `public.admin_profiles` (role `admin`). Admin sign in checks both Supabase authentication and this allowlist.
 4. Deploy/redeploy the project at `https://jixels-wifi-connect.vercel.app`.
@@ -19,13 +19,48 @@ The supplied router screenshots identify the interface as `TYRAX3004H` (the devi
 
 The Network Settings screenshot confirms the router's LAN admin address is `192.168.1.1` and DHCP leases range from `192.168.1.100` to `192.168.1.249`. The earlier `192.168.10.1` value is shown separately as the upstream Internet default gateway. Do not change the LAN or DHCP values to configure a captive portal. Vercel cannot directly reach private LAN addresses; the TYRAX option below uses a local PC agent for router API calls. The visible router firmware has no captive-portal redirect, so its local agent can allow/block a paid device but cannot force the payment page to pop up.
 
+## MikroTik HotSpot gateway with Tenda access point
+
+This is the supported path if you buy/use a MikroTik: Airtel LAN connects to the MikroTik WAN; the Tenda runs in AP/bridge mode with its DHCP server disabled and connects to a guest-side MikroTik LAN/bridge; guests join the Tenda's Barrio- HOTSPOT SSID. Airtel Wi-Fi must stay private for staff. Guest traffic must pass through the MikroTik HotSpot.
+
+The MikroTik portal login page is provided in `mikrotik/hotspot/login.html`. Upload it as the HotSpot `login.html` file. It forwards RouterOS's `$(mac)` and `$(ip)` values to the Vercel portal; checkout never asks the customer to type a MAC. Add `jixels-wifi-connect.vercel.app` to the MikroTik HotSpot walled garden so the portal can load before authentication. Configure HotSpot login-by `http-pap`; the app's local agent creates a temporary RouterOS HotSpot user locked to the originating MAC and paid duration, and the customer's browser submits that one-time login after CloudPay confirms payment. Keep RouterOS management reachable only on the trusted LAN. Use RouterOS v7 REST over trusted HTTPS if available; if using HTTP, isolate it to the wired/trusted LAN and restrict it to the agent PC's IP.
+
+In Vercel set:
+
+* `WIFI_GATEWAY_MODE=mikrotik-agent`
+* `MIKROTIK_GATEWAY_ID=main` (or another short ID, matching this site)
+* `MIKROTIK_AGENT_TOKEN` to a random 32-byte token
+* `MIKROTIK_CREDENTIAL_SECRET` to a separate random secret of at least 32 bytes
+* `MIKROTIK_HOTSPOT_LOGIN_URL` to the private RouterOS HotSpot login URL, for example `http://192.168.88.1/login`
+* The CloudPay values listed above, including the signed callback at `https://jixels-wifi-connect.vercel.app/api/cloudpay/webhook`
+
+Run migration `007_mikrotik_gateway.sql` after `001` through `006`. On the always-on Windows PC connected to the MikroTik's trusted LAN, run PowerShell from this repository:
+
+```powershell
+$b = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+$AgentToken = [BitConverter]::ToString($b).Replace('-', '').ToLower()
+Set-Clipboard $AgentToken
+# Save this token in Vercel as MIKROTIK_AGENT_TOKEN, then generate a different secret:
+$secretBytes = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($secretBytes)
+$MikrotikCredentialSecret = [BitConverter]::ToString($secretBytes).Replace('-', '').ToLower()
+# Save this separate value in Vercel as MIKROTIK_CREDENTIAL_SECRET.
+./tools/setup-mikrotik-agent.ps1 -AgentToken $AgentToken -RouterUrl 'http://192.168.88.1'
+./tools/mikrotik-agent.ps1
+```
+
+Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and limit it to hotspot user/active operations and the agent PC. The agent validates that MikroTik still sees the checkout IP and MAC together before it creates access. RouterOS `limit-uptime` removes the paid session at expiry; the agent also removes active sessions and temporary users when the expiry job runs. The app polls this agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
+
+This MikroTik path requires the Tenda to be an access point behind the MikroTik. A Tenda connected directly to Airtel, or left routing with its own DHCP, bypasses the HotSpot gateway. Phone tethering through an already-authorized device cannot be reliably blocked by MAC-based HotSpot control.
+
 ## OpenNDS hotspot gateway
 
 Keep the Airtel unit as the 5G Internet source and add a separate gateway/access point that supports OpenWrt and openNDS. Connect Airtel LAN to the new gateway's WAN; have customer devices join the new gateway's Wi-Fi, which must be the default gateway for their traffic. Keep the Airtel Wi-Fi private for administration or disable it for guests, so customers cannot bypass the hotspot. Do not flash custom firmware onto the Airtel unit unless its exact hardware revision is confirmed as supported.
 
 The application includes an openNDS HTTPS FAS endpoint (`/api/opennds/fas`), validates the FAS level 4 gateway identity, obtains the client MAC from the gateway portal context (customers never type it), binds checkout to that client, and grants access only after the signed CloudPay webhook confirms the exact amount. The customer enters only the M-Pesa phone number. openNDS enforces each purchased duration on the gateway; the scheduled job updates Supabase session records.
 
-For production, run migrations `001` to `006`, configure these Vercel environment variables, and redeploy:
+For the openNDS option, run migrations `001` to `006`, configure these Vercel environment variables, and redeploy:
 
 * `OPENNDS_GATEWAY_NAME`: exact `gatewayname` configured in openNDS.
 * `OPENNDS_FAS_KEY`: long random secret, shared only between Vercel and openNDS.
@@ -39,7 +74,7 @@ Reference: [openNDS HTTPS FAS documentation](https://github.com/openNDS/openNDS/
 
 ## Existing TYRAX router local agent
 
-The TYRAX3004H admin interface exposes a local device block/unblock API. The Windows PowerShell bridge in `tools/tyrax-agent.ps1` can issue these local commands without putting the router password in Vercel, but TYRAX does not provide captive-portal redirection. Phone-only checkout and automatic client identification are supported by the openNDS flow described above. MikroTik HotSpot is not yet integrated; it needs its own RouterOS authentication adapter and a supported network path.
+The TYRAX3004H admin interface exposes a local device block/unblock API. The Windows PowerShell bridge in `tools/tyrax-agent.ps1` can issue local commands without putting the router password in Vercel, but TYRAX does not provide captive-portal redirection. It cannot provide the full billing-to-login flow described for openNDS or MikroTik.
 
 Run migration `005_tyrax_local_agent.sql`. In Vercel set `WIFI_GATEWAY_MODE=tyrax-agent` and `TYRAX_AGENT_TOKEN` to a fresh long random token. Generate one in Windows PowerShell with:
 
