@@ -3,7 +3,7 @@ const fmt = value => `KSh ${Number(value || 0).toLocaleString('en-KE')}`;
 const durationLabel = minutes => minutes === 90 ? '1 hr 30 min' : minutes % 1440 === 0 ? `${minutes / 1440} day${minutes === 1440 ? '' : 's'}` : minutes % 60 === 0 ? `${minutes / 60} hr${minutes === 60 ? '' : 's'}` : `${minutes} min`;
 const kenyaTime = value => value ? new Intl.DateTimeFormat('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '--';
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-let catalogue = [], breakdown = [], token = sessionStorage.getItem('jixelsAdminToken'), toastTimer;
+let catalogue = [], breakdown = [], token = sessionStorage.getItem('jixelsAdminToken'), toastTimer, deferredInstallPrompt = null;
 const authHeaders = () => token ? { Authorization: `Bearer ${token}` } : {};
 
 function notify(message, isError = false) {
@@ -225,6 +225,23 @@ $('#cancelBottom').onclick = () => $('#editor').close();
 $('#packageSearch').oninput = renderPackages;
 $('#packageFilter').onchange = renderPackages;
 $('#logout').onclick = () => { sessionStorage.removeItem('jixelsAdminToken'); token = null; showLogin(); };
+$('#installApp').onclick = async () => {
+  if (!deferredInstallPrompt) {
+    notify('To install, use your browser menu and choose Install app or Add to Home screen.');
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  const choice = await deferredInstallPrompt.userChoice;
+  if (choice.outcome === 'accepted') $('#installApp').hidden = true;
+  deferredInstallPrompt = null;
+};
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+});
+window.addEventListener('appinstalled', () => { $('#installApp').hidden = true; });
+if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) $('#installApp').hidden = true;
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 document.addEventListener('keydown', event => { if (event.key === 'Escape') setMenu(false); });
 
 token ? loadDashboard() : showLogin();

@@ -9,6 +9,8 @@ Responsive customer portal and serverless Wi-Fi billing application for Vercel. 
 3. Create the admin user in Supabase Authentication, then insert that user's UUID in `public.admin_profiles` (role `admin`). Admin sign in checks both Supabase authentication and this allowlist.
 4. Deploy/redeploy the project at `https://jixels-wifi-connect.vercel.app`.
 
+The admin portal is installable as a PWA from `/admin.html`. After signing in, use **Install app** in the left navigation. Dashboard API responses are never cached by the service worker; the app shell is cached so the admin page can open offline, while live management data still requires internet access.
+
 ## M-Pesa billing
 
 Configure CloudPay in Vercel with `CLOUDPAY_CONSUMER_KEY`, `CLOUDPAY_CONSUMER_SECRET`, `CLOUDPAY_WEBHOOK_SECRET`, and `CLOUDPAY_ENV=sandbox`. In the CloudPay dashboard, set the payment webhook URL to `https://jixels-wifi-connect.vercel.app/api/cloudpay/webhook` and copy its signing secret into `CLOUDPAY_WEBHOOK_SECRET`. The browser does not decide price or payment state; only a valid signed CloudPay completion event for the exact amount starts a paid session. Switch `CLOUDPAY_ENV=production` only after sandbox checkout and webhook verification.

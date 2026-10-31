@@ -4,7 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101d35">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Barrio Admin">
   <title>Barrio- HOTSPOT Admin</title>
+  <link rel="manifest" href="/admin.webmanifest">
+  <link rel="icon" href="/assets/admin-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/assets/admin-icon-192.png">
   <link rel="stylesheet" href="admin.css">
   <link rel="stylesheet" href="admin-login.css">
 </head>
@@ -15,6 +21,9 @@
         <span class="brand-mark" aria-hidden="true">J</span>
         <span><b>Barrio- HOTSPOT</b><small>WI-FI ADMIN</small></span>
       </a>
+      <button id="installApp" class="install-app" type="button" aria-label="Install Barrio admin app">
+        <span class="install-icon" aria-hidden="true">↓</span><span>Install app</span>
+      </button>
       <nav class="side-nav" aria-label="Admin navigation">
         <a class="nav-link active" href="#overview">Overview</a>
         <a class="nav-link" href="#packagesSection">Packages</a>
