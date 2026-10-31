@@ -51,7 +51,8 @@ function renderPackages(packages) {
     card.dataset.packageId = item.id;
     card.tabIndex = 0;
     card.className = `plan ${item.is_popular ? 'popular' : ''} ${item.is_best_value ? 'best' : ''}`;
-    card.innerHTML = `${item.is_popular ? '<span>POPULAR</span>' : ''}${item.is_best_value ? '<span>BEST VALUE</span>' : ''}<i aria-hidden="true">Wi-Fi</i><h3></h3><b>${fmt(item.price_kes)}</b><p>${duration(item.duration_minutes)}</p><button type="button">Buy Now</button>`;
+    const badge = item.is_popular ? 'Popular' : item.is_best_value ? 'Best value' : '';
+    card.innerHTML = `${badge ? `<span>${badge}</span>` : ''}<i aria-hidden="true">Wi-Fi</i><h3></h3><b>${fmt(item.price_kes)}</b><p>${duration(item.duration_minutes)}</p><button type="button">Buy Now</button>`;
     card.querySelector('h3').textContent = item.name;
     card.onclick = () => openPackage(item);
     card.onkeydown = event => { if (event.key === 'Enter') openPackage(item); };
