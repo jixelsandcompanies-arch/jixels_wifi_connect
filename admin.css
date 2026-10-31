@@ -11,3 +11,6 @@ body, body * { font-family: Arial, Helvetica, sans-serif !important; font-style:
 
 /* Plain regular heading typography. */
 h1, h2, h3, h4, h5, h6 { font-family: Arial, Helvetica, sans-serif !important; font-style: normal !important; font-weight: 400 !important; letter-spacing: normal !important; text-transform: none !important; text-decoration: none !important; }
+
+.admin-view{display:none}.admin-view.active{display:block}
+.install-icon{display:block;width:22px;height:22px;padding:3px;border-radius:6px;background:var(--red);fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}

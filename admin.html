@@ -17,18 +17,18 @@
 <body>
   <div class="admin-shell">
     <aside class="sidebar" id="sidebar">
-      <a class="brand" href="#overview" aria-label="Barrio- HOTSPOT Admin home">
+      <a class="brand" href="#overviewPage" aria-label="Barrio- HOTSPOT Admin home">
         <span class="brand-mark" aria-hidden="true">J</span>
         <span><b>Barrio- HOTSPOT</b><small>WI-FI ADMIN</small></span>
       </a>
       <button id="installApp" class="install-app" type="button" aria-label="Install Barrio admin app">
-        <span class="install-icon" aria-hidden="true">↓</span><span>Install app</span>
+        <svg class="install-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"/></svg><span>Install app</span>
       </button>
       <nav class="side-nav" aria-label="Admin navigation">
-        <a class="nav-link active" href="#overview">Overview</a>
-        <a class="nav-link" href="#packagesSection">Packages</a>
-        <a class="nav-link" href="#sessionsSection">Sessions</a>
-        <a class="nav-link" href="#revenueSection">Payments &amp; revenue</a>
+        <a class="nav-link active" href="#overviewPage" data-page="overview" aria-current="page">Overview</a>
+        <a class="nav-link" href="#packagesPage" data-page="packages">Packages</a>
+        <a class="nav-link" href="#sessionsPage" data-page="sessions">Sessions</a>
+        <a class="nav-link" href="#revenuePage" data-page="revenue">Payments &amp; revenue</a>
       </nav>
       <div class="sidebar-bottom">
         <div class="network-label"><span class="online-dot"></span><span><b>Barrio- HOTSPOT</b><small>Wi-Fi network</small></span></div>
@@ -40,15 +40,18 @@
     <main id="overview" class="main-content">
       <header class="topbar">
         <button id="menuToggle" class="menu-toggle" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><span></span><span></span><span></span></button>
-        <div class="page-heading"><small>BUSINESS MANAGEMENT</small><h1>Overview</h1><p>Monitor your hotspot, manage packages and review payments.</p></div>
+        <div class="page-heading"><small id="pageEyebrow">BUSINESS MANAGEMENT</small><h1 id="pageTitle">Overview</h1><p id="pageDescription">Monitor your hotspot and billing activity.</p></div>
         <button id="refresh" class="button button-quiet" type="button"> Refresh</button>
       </header>
 
-      <section class="section-block" aria-labelledby="summaryTitle">
+      <section class="admin-view active" id="overviewPage" data-page-view="overview" aria-labelledby="summaryTitle">
+      <section class="section-block">
         <div class="section-heading"><div><h2 id="summaryTitle">Business summary</h2><p>Live totals from your billing records.</p></div><span id="updatedAt" class="muted"></span></div>
         <div id="metrics" class="metrics" aria-live="polite"><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div></div>
       </section>
+      </section>
 
+      <section class="admin-view" id="packagesPage" data-page-view="packages" hidden>
       <section id="packagesSection" class="section-block card-section" aria-labelledby="packagesTitle">
         <div class="section-heading section-heading-wrap">
           <div><h2 id="packagesTitle">Wi-Fi packages</h2><p>Add plans, update prices and control what customers can buy.</p></div>
@@ -63,20 +66,23 @@
           <table><thead><tr><th>Package</th><th>Price</th><th>Duration</th><th>Sales</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody id="packages"><tr><td colspan="6" class="table-message">Loading packages...</td></tr></tbody></table>
         </div>
       </section>
+      </section>
 
-      <div class="lower-grid">
+      <section class="admin-view" id="sessionsPage" data-page-view="sessions" hidden>
         <section id="sessionsSection" class="section-block card-section" aria-labelledby="sessionsTitle">
           <div class="section-heading"><div><h2 id="sessionsTitle">Customer sessions</h2><p>Latest Wi-Fi access activity.</p></div><span class="live-pill"><span class="online-dot"></span>Live data</span></div>
           <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Package</th><th>Started</th><th>Expires</th><th>Status</th></tr></thead><tbody id="sessions"><tr><td colspan="5" class="table-message">Loading sessions...</td></tr></tbody></table></div>
           <p class="table-note">Showing the latest 50 sessions.</p>
         </section>
+      </section>
+      <section class="admin-view" id="revenuePage" data-page-view="revenue" hidden>
         <section id="revenueSection" class="section-block card-section" aria-labelledby="revenueTitle">
           <div class="section-heading"><div><h2 id="revenueTitle">Payments &amp; revenue</h2><p>Confirmed M-Pesa payments only.</p></div></div>
           <div id="revenue" class="revenue-list"><p class="table-message">Loading revenue...</p></div>
           <h3 class="subheading">Sales by package</h3>
           <div id="breakdown" class="breakdown-list"><p class="table-message">Loading package sales...</p></div>
         </section>
-      </div>
+      </section>
       <footer class="admin-footer">Barrio- HOTSPOT Billing <span>|</span> All times shown in East Africa Time</footer>
     </main>
   </div>

@@ -212,10 +212,43 @@ function setMenu(open) {
   $('#menuToggle').setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
 }
 
-document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', () => {
-  document.querySelectorAll('.nav-link').forEach(item => item.classList.toggle('active', item === link));
+const adminPages = {
+  overview: ['Overview', 'BUSINESS MANAGEMENT', 'Monitor your hotspot and billing activity.'],
+  packages: ['Packages', 'CUSTOMER PLANS', 'Create packages, update prices, and control availability.'],
+  sessions: ['Sessions', 'CUSTOMER ACCESS', 'Review recent Wi-Fi sessions and their status.'],
+  revenue: ['Payments & revenue', 'BILLING REPORTS', 'Track confirmed payments and package sales.']
+};
+
+function showAdminPage(page, updateHistory = false) {
+  if (!adminPages[page]) page = 'overview';
+  document.querySelectorAll('[data-page-view]').forEach(view => {
+    const active = view.dataset.pageView === page;
+    view.hidden = !active;
+    view.classList.toggle('active', active);
+  });
+  document.querySelectorAll('.nav-link').forEach(link => {
+    const active = link.dataset.page === page;
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  const [title, eyebrow, description] = adminPages[page];
+  $('#pageTitle').textContent = title;
+  $('#pageEyebrow').textContent = eyebrow;
+  $('#pageDescription').textContent = description;
+  if (updateHistory) history.pushState({ adminPage: page }, '', `#${page}Page`);
   setMenu(false);
+}
+
+document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', event => {
+  event.preventDefault();
+  showAdminPage(link.dataset.page, true);
 }));
+$('.brand').addEventListener('click', event => { event.preventDefault(); showAdminPage('overview', true); });
+window.addEventListener('popstate', () => {
+  const page = document.querySelector(`.nav-link[href="${location.hash}"]`)?.dataset.page || 'overview';
+  showAdminPage(page);
+});
 $('#menuToggle').onclick = () => setMenu(!$('#sidebar').classList.contains('open'));
 $('#sidebarBackdrop').onclick = () => setMenu(false);
 $('#refresh').onclick = loadDashboard;
@@ -244,4 +277,6 @@ if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 document.addEventListener('keydown', event => { if (event.key === 'Escape') setMenu(false); });
 
+const initialPage = document.querySelector(`.nav-link[href="${location.hash}"]`)?.dataset.page || 'overview';
+showAdminPage(initialPage);
 token ? loadDashboard() : showLogin();
