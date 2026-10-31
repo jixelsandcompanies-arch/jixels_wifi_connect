@@ -1,2 +1,5 @@
 /* Final hero polish: clean geometric Wi-Fi icon and calmer typography. */
 .top{height:96px}.logo b{font-size:36px}.logo>span{font-size:25px;top:-17px;left:11px}.hero{min-height:275px;padding:48px 5.5%}.hero h1{font-size:39px}.hero p{font-size:17px}.hero nav{font-size:14px;margin-top:28px}.hero-art{gap:34px}.wifi-mark{width:136px;height:112px}.wifi-mark svg{width:100%;height:100%;overflow:visible}.wifi-mark path{fill:none;stroke:#62c5ff;stroke-width:10;stroke-linecap:round}.wifi-mark circle{fill:#62c5ff}@media(max-width:700px){.top{height:78px}.logo b{font-size:30px}.hero{padding:35px 6%;min-height:235px}.hero h1{font-size:31px}.hero p{font-size:16px}}
+
+/* Use plain, regular text throughout the billing UI. */
+body, body * { font-family: Arial, Helvetica, sans-serif !important; font-style: normal !important; font-weight: 400 !important; letter-spacing: normal !important; text-transform: none !important; text-decoration: none !important; }
