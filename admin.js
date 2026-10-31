@@ -30,7 +30,7 @@ async function requestJson(url, options = {}) {
 
 function showLogin() {
   if ($('.login')) return;
-  document.body.insertAdjacentHTML('afterbegin', '<div class="login"><form id="loginForm"><b>Jixels</b><h1>Admin sign in</h1><p>Use your administrator account to manage this hotspot.</p><label>Email<input id="loginEmail" type="email" autocomplete="username" required></label><label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label><button id="loginSubmit" type="submit">Sign in</button><small id="loginError" role="alert"></small></form></div>');
+  document.body.insertAdjacentHTML('afterbegin', '<div class="login"><form id="loginForm"><b>Barrio- HOTSPOT</b><h1>Admin sign in</h1><p>Use your administrator account to manage this hotspot.</p><label>Email<input id="loginEmail" type="email" autocomplete="username" required></label><label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label><button id="loginSubmit" type="submit">Sign in</button><small id="loginError" role="alert"></small></form></div>');
   $('#loginForm').onsubmit = async event => {
     event.preventDefault();
     const submit = $('#loginSubmit'), error = $('#loginError');
