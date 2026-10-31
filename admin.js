@@ -1,7 +1,7 @@
 const $ = selector => document.querySelector(selector);
 const fmt = value => `KSh ${Number(value || 0).toLocaleString('en-KE')}`;
 const durationLabel = minutes => minutes === 90 ? '1 hr 30 min' : minutes % 1440 === 0 ? `${minutes / 1440} day${minutes === 1440 ? '' : 's'}` : minutes % 60 === 0 ? `${minutes / 60} hr${minutes === 60 ? '' : 's'}` : `${minutes} min`;
-const kenyaTime = value => value ? new Intl.DateTimeFormat('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
+const kenyaTime = value => value ? new Intl.DateTimeFormat('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '--';
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
 let catalogue = [], breakdown = [], token = sessionStorage.getItem('jixelsAdminToken'), toastTimer;
 const authHeaders = () => token ? { Authorization: `Bearer ${token}` } : {};
@@ -35,7 +35,7 @@ function showLogin() {
     event.preventDefault();
     const submit = $('#loginSubmit'), error = $('#loginError');
     submit.disabled = true;
-    error.textContent = 'Signing in…';
+    error.textContent = 'Signing in...';
     try {
       const data = await requestJson('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: $('#loginEmail').value.trim(), password: $('#loginPassword').value }) });
       token = data.accessToken;
@@ -72,7 +72,7 @@ function renderPackages() {
     return;
   }
   $('#packages').innerHTML = filtered.map(item => {
-    const tags = [item.is_popular ? 'Popular' : '', item.is_best_value ? 'Best value' : ''].filter(Boolean).join(' · ');
+    const tags = [item.is_popular ? 'Popular' : '', item.is_best_value ? 'Best value' : ''].filter(Boolean).join(' | ');
     const sold = breakdown.find(row => row.package_id === item.id)?.sold || 0;
     return `<tr>
       <td><span class="package-name">${escapeHtml(item.name)}</span>${tags ? `<span class="package-tags">${escapeHtml(tags)}</span>` : ''}</td>

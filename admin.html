@@ -16,10 +16,10 @@
         <span><b>Barrio- HOTSPOT</b><small>WI-FI ADMIN</small></span>
       </a>
       <nav class="side-nav" aria-label="Admin navigation">
-        <a class="nav-link active" href="#overview"><span aria-hidden="true">⌂</span>Overview</a>
-        <a class="nav-link" href="#packagesSection"><span aria-hidden="true">◫</span>Packages</a>
-        <a class="nav-link" href="#sessionsSection"><span aria-hidden="true">◉</span>Sessions</a>
-        <a class="nav-link" href="#revenueSection"><span aria-hidden="true">▤</span>Payments &amp; revenue</a>
+        <a class="nav-link active" href="#overview">Overview</a>
+        <a class="nav-link" href="#packagesSection">Packages</a>
+        <a class="nav-link" href="#sessionsSection">Sessions</a>
+        <a class="nav-link" href="#revenueSection">Payments &amp; revenue</a>
       </nav>
       <div class="sidebar-bottom">
         <div class="network-label"><span class="online-dot"></span><span><b>Barrio- HOTSPOT</b><small>Wi-Fi network</small></span></div>
@@ -32,7 +32,7 @@
       <header class="topbar">
         <button id="menuToggle" class="menu-toggle" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><span></span><span></span><span></span></button>
         <div class="page-heading"><small>BUSINESS MANAGEMENT</small><h1>Overview</h1><p>Monitor your hotspot, manage packages and review payments.</p></div>
-        <button id="refresh" class="button button-quiet" type="button"><span aria-hidden="true">↻</span> Refresh</button>
+        <button id="refresh" class="button button-quiet" type="button"> Refresh</button>
       </header>
 
       <section class="section-block" aria-labelledby="summaryTitle">
@@ -43,38 +43,38 @@
       <section id="packagesSection" class="section-block card-section" aria-labelledby="packagesTitle">
         <div class="section-heading section-heading-wrap">
           <div><h2 id="packagesTitle">Wi-Fi packages</h2><p>Add plans, update prices and control what customers can buy.</p></div>
-          <button id="add" class="button button-primary" type="button"><span aria-hidden="true">＋</span> Add package</button>
+          <button id="add" class="button button-primary" type="button"> Add package</button>
         </div>
         <div class="toolbar">
-          <label class="search-box"><span aria-hidden="true">⌕</span><input id="packageSearch" type="search" placeholder="Search packages" aria-label="Search packages"></label>
+          <label class="search-box"><input id="packageSearch" type="search" placeholder="Search packages" aria-label="Search packages"></label>
           <label class="filter-box"><span class="visually-hidden">Filter packages</span><select id="packageFilter"><option value="all">All packages</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
           <span id="packageTotal" class="result-count"></span>
         </div>
         <div class="table-wrap">
-          <table><thead><tr><th>Package</th><th>Price</th><th>Duration</th><th>Sales</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody id="packages"><tr><td colspan="6" class="table-message">Loading packages…</td></tr></tbody></table>
+          <table><thead><tr><th>Package</th><th>Price</th><th>Duration</th><th>Sales</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody id="packages"><tr><td colspan="6" class="table-message">Loading packages...</td></tr></tbody></table>
         </div>
       </section>
 
       <div class="lower-grid">
         <section id="sessionsSection" class="section-block card-section" aria-labelledby="sessionsTitle">
           <div class="section-heading"><div><h2 id="sessionsTitle">Customer sessions</h2><p>Latest Wi-Fi access activity.</p></div><span class="live-pill"><span class="online-dot"></span>Live data</span></div>
-          <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Package</th><th>Started</th><th>Expires</th><th>Status</th></tr></thead><tbody id="sessions"><tr><td colspan="5" class="table-message">Loading sessions…</td></tr></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Package</th><th>Started</th><th>Expires</th><th>Status</th></tr></thead><tbody id="sessions"><tr><td colspan="5" class="table-message">Loading sessions...</td></tr></tbody></table></div>
           <p class="table-note">Showing the latest 50 sessions.</p>
         </section>
         <section id="revenueSection" class="section-block card-section" aria-labelledby="revenueTitle">
           <div class="section-heading"><div><h2 id="revenueTitle">Payments &amp; revenue</h2><p>Confirmed M-Pesa payments only.</p></div></div>
-          <div id="revenue" class="revenue-list"><p class="table-message">Loading revenue…</p></div>
+          <div id="revenue" class="revenue-list"><p class="table-message">Loading revenue...</p></div>
           <h3 class="subheading">Sales by package</h3>
-          <div id="breakdown" class="breakdown-list"><p class="table-message">Loading package sales…</p></div>
+          <div id="breakdown" class="breakdown-list"><p class="table-message">Loading package sales...</p></div>
         </section>
       </div>
-      <footer class="admin-footer">Barrio- HOTSPOT Billing <span>·</span> All times shown in East Africa Time</footer>
+      <footer class="admin-footer">Barrio- HOTSPOT Billing <span>|</span> All times shown in East Africa Time</footer>
     </main>
   </div>
 
   <dialog id="editor" class="editor-dialog">
     <form id="form">
-      <div class="modal-title"><div><small>PACKAGE SETTINGS</small><h2 id="title">Add package</h2></div><button type="button" id="cancel" class="icon-button" aria-label="Close">×</button></div>
+      <div class="modal-title"><div><small>PACKAGE SETTINGS</small><h2 id="title">Add package</h2></div><button type="button" id="cancel" class="icon-button" aria-label="Close">X</button></div>
       <input id="id" type="hidden">
       <div class="form-grid">
         <label class="field field-wide">Package name<input id="name" maxlength="80" autocomplete="off" placeholder="e.g. 2 Hours" required></label>
