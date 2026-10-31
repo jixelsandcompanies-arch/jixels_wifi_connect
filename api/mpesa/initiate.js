@@ -1,30 +1,24 @@
 import { supabase } from '../../lib/supabase.js';
-import { isGatewayConfigured, isTyraxAgentMode, isTyraxAgentOnline } from '../../lib/gateway.js';
+import { isGatewayConfigured, isTyraxAgentMode } from '../../lib/gateway.js';
 import { createHash, randomBytes } from 'node:crypto';
 const mpesaBase = () => process.env.MPESA_ENV === 'production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
 async function accessToken() { const basic = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64'); const r = await fetch(`${mpesaBase()}/oauth/v1/generate?grant_type=client_credentials`, { headers: { Authorization: `Basic ${basic}` } }); const data = await r.json(); if (!r.ok || !data.access_token) throw new Error('M-Pesa authentication failed'); return data.access_token; }
 const kenyaPhone = phone => String(phone || '').replace(/\D/g, '').replace(/^0/, '254');
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-  const { packageId, phone, portalToken, macAddress: submittedMac = null, deviceCode = null } = req.body || {};
+  const { packageId, phone, portalToken, deviceCode = null } = req.body || {};
   if (!process.env.MPESA_CONSUMER_KEY || !process.env.MPESA_CONSUMER_SECRET || !process.env.MPESA_SHORTCODE || !process.env.MPESA_PASSKEY || !process.env.MPESA_CALLBACK_URL) return res.status(503).json({ error: 'M-Pesa payments are not configured yet' });
   if (!isGatewayConfigured()) return res.status(503).json({ error: 'Wi-Fi access activation is not configured for this router yet. Please contact the Wi-Fi administrator.' });
-  const tyraxAgentMode = isTyraxAgentMode();
-  if (tyraxAgentMode && !(await isTyraxAgentOnline())) return res.status(503).json({ error: 'The local Wi-Fi access service is offline. Please try again later.' });
-  if (!tyraxAgentMode && !/^[a-f0-9]{64}$/.test(portalToken || '')) return res.status(400).json({ error: 'Connect through the hotspot portal before purchasing.' });
+  if (isTyraxAgentMode()) return res.status(503).json({ error: 'Automatic device identification requires the openNDS captive portal. The TYRAX router agent cannot identify a customer device from a phone number.' });
+  if (!/^[a-f0-9]{64}$/.test(portalToken || '')) return res.status(400).json({ error: 'Join the hotspot and open its captive portal before purchasing. The connected device is identified automatically.' });
   if (!/^(?:254(?:1|7)\d{8})$/.test(kenyaPhone(phone))) return res.status(400).json({ error: 'Enter a valid Kenyan M-Pesa phone number' });
   if (!packageId) return res.status(400).json({ error: 'Select an available Wi-Fi package' });
   const db = supabase();
   let context = null, normalizedMac = null;
-  if (tyraxAgentMode) {
-    if (!/^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i.test(submittedMac || '')) return res.status(400).json({ error: 'Enter the Wi-Fi MAC address for this device.' });
-    normalizedMac = submittedMac.toLowerCase().replaceAll('-', ':');
-  } else {
-    const result = await db.from('opennds_portal_contexts').select('id,mac_address').eq('token_hash', createHash('sha256').update(portalToken).digest('hex')).gt('expires_at', new Date().toISOString()).is('consumed_at', null).maybeSingle();
-    context = result.data;
-    if (!context) return res.status(400).json({ error: 'Hotspot session expired. Reconnect to the Wi-Fi and try again.' });
-    normalizedMac = context.mac_address;
-  }
+  const result = await db.from('opennds_portal_contexts').select('id,mac_address').eq('token_hash', createHash('sha256').update(portalToken).digest('hex')).gt('expires_at', new Date().toISOString()).is('consumed_at', null).maybeSingle();
+  context = result.data;
+  if (!context) return res.status(400).json({ error: 'Hotspot session expired. Reconnect to the Wi-Fi and try again.' });
+  normalizedMac = context.mac_address;
   const { data: plan } = await db.from('wifi_packages').select('*').eq('id', packageId).eq('is_active', true).single();
   if (!plan) return res.status(400).json({ error: 'Selected package is unavailable' });
   let deviceId = null;

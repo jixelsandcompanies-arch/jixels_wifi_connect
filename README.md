@@ -23,7 +23,7 @@ The Network Settings screenshot confirms the router's LAN admin address is `192.
 
 Keep the Airtel unit as the 5G Internet source and add a separate gateway/access point that supports OpenWrt and openNDS. Connect Airtel LAN to the new gateway's WAN; have customer devices join the new gateway's Wi-Fi, which must be the default gateway for their traffic. Keep the Airtel Wi-Fi private for administration or disable it for guests, so customers cannot bypass the hotspot. Do not flash custom firmware onto the Airtel unit unless its exact hardware revision is confirmed as supported.
 
-The application now includes an openNDS HTTPS FAS endpoint (`/api/opennds/fas`), validates the FAS level 4 gateway identity, binds checkout to the originating client, queues authorization only after the Daraja callback confirms the exact amount, and waits for authmon's signed acknowledgement before showing the client's session as active. openNDS enforces each purchased duration on the gateway; the scheduled job updates Supabase session records.
+The application now includes an openNDS HTTPS FAS endpoint (`/api/opennds/fas`), validates the FAS level 4 gateway identity, obtains the client MAC from the signed gateway portal context (customers never type it), binds checkout to that client, queues authorization only after the Daraja callback confirms the exact amount, and waits for authmon's signed acknowledgement before showing the client's session as active. The customer enters only the M-Pesa phone number. openNDS enforces each purchased duration on the gateway; the scheduled job updates Supabase session records.
 
 For production, run migrations `001` to `006`, configure these Vercel environment variables, and redeploy:
 
@@ -39,7 +39,7 @@ Reference: [openNDS HTTPS FAS documentation](https://github.com/openNDS/openNDS/
 
 ## Existing TYRAX router local agent
 
-The TYRAX3004H admin interface exposes a local device block/unblock API. To use it without putting the router password in Vercel, run the Windows PowerShell bridge in `tools/tyrax-agent.ps1` on a PC that stays powered on and connected to the same LAN as the router. This mode accepts the device Wi-Fi MAC in checkout, queues an allow command after confirmed M-Pesa payment, and blocks that MAC after its paid session expires.
+The TYRAX3004H admin interface exposes a local device block/unblock API. To use it without putting the router password in Vercel, run the Windows PowerShell bridge in `tools/tyrax-agent.ps1` on a PC that stays powered on and connected to the same LAN as the router. The agent mode cannot automatically associate a checkout phone number with a connected device; phone-only checkout is supported through openNDS, which supplies the device MAC in its portal context.
 
 Run migration `005_tyrax_local_agent.sql`. In Vercel set `WIFI_GATEWAY_MODE=tyrax-agent` and `TYRAX_AGENT_TOKEN` to a fresh long random token. Generate one in Windows PowerShell with:
 
@@ -50,7 +50,7 @@ $AgentToken = [BitConverter]::ToString($b).Replace('-', '').ToLower()
 Set-Clipboard $AgentToken
 ```
 
-Paste that token into Vercel, redeploy, then in PowerShell from this repository run `./tools/setup-tyrax-agent.ps1 -AgentToken $AgentToken` and `./tools/tyrax-agent.ps1`. The setup script prompts for the TYRAX admin password and stores it encrypted for that Windows account; the password is never sent to Vercel. The PC must remain online. This bridge provides device allow/block control, **not a captive portal**: customers must open the Jixels site themselves and enter the Wi-Fi MAC shown in their device settings. The router currently permits ordinary clients unless they are separately blocked, so this mode alone does not prevent unpaid devices from using Wi-Fi. Do not describe it as a full paywall until a default-deny policy and access to the payment site for blocked devices are configured and confirmed on the router.
+Paste that token into Vercel, redeploy, then in PowerShell from this repository run `./tools/setup-tyrax-agent.ps1 -AgentToken $AgentToken` and `./tools/tyrax-agent.ps1`. The setup script prompts for the TYRAX admin password and stores it encrypted for that Windows account; the password is never sent to Vercel. The PC must remain online. This bridge provides device allow/block control, **not a captive portal**. It cannot provide automatic phone-only device identification or prevent unpaid access unless a default-deny policy and access to the payment site for blocked devices are configured and confirmed on the router.
 
 ## Expiry job
 

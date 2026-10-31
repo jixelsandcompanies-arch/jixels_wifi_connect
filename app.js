@@ -2,25 +2,23 @@ const grid = document.querySelector('#planGrid');
 const modal = document.querySelector('#purchaseModal');
 const fmt = value => `KSh ${Number(value).toLocaleString('en-KE')}`;
 const duration = minutes => minutes === 90 ? '1 hour 30 minutes' : minutes >= 1440 ? `${minutes / 1440} days` : minutes >= 60 ? `${minutes / 60} hours` : `${minutes} minutes`;
-let selected, portalToken = null, portalError = null;
+let selected, portalToken = null, portalError = null, portalReady = Promise.resolve();
 
 const params = new URLSearchParams(location.search);
 const fas = params.get('fas');
 if (fas) {
   history.replaceState({}, '', location.pathname);
-  fetch('/api/opennds/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fas }) })
+  portalReady = fetch('/api/opennds/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fas }) })
     .then(async response => {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Hotspot session could not be verified.');
       portalToken = result.portalToken;
-      document.querySelector('#modalMacLabel').hidden = true;
     })
     .catch(error => { portalError = error.message; });
 }
 
 function openPackage(item) {
   selected = item;
-  document.querySelector('#modalMacLabel').hidden = Boolean(portalToken);
   document.querySelectorAll('.plan').forEach(card => card.classList.toggle('selected', card.dataset.packageId === item.id));
   document.querySelector('#modalName').textContent = item.name;
   document.querySelector('#modalPrice').textContent = fmt(item.price_kes);
@@ -65,21 +63,20 @@ loadPackages();
 document.querySelector('#modalPay').onclick = async () => {
   const status = document.querySelector('#modalStatus');
   const payButton = document.querySelector('#modalPay');
-  if (portalError) { status.textContent = portalError; return; }
+  payButton.disabled = true;
+  status.textContent = 'Verifying the connected Wi-Fi device...';
+  await portalReady;
+  if (portalError) { status.textContent = portalError; payButton.disabled = false; return; }
+  if (!portalToken) { status.textContent = 'Join Barrio- HOTSPOT and open its sign-in page to buy access for this device.'; payButton.disabled = false; return; }
   const phone = document.querySelector('#modalPhone').value.trim().replace(/[\s-]/g, '');
   if (!/^(?:0(?:1|7)\d{8}|254(?:1|7)\d{8})$/.test(phone)) {
     status.textContent = 'Enter a valid Kenyan M-Pesa number, starting with 01 or 07.';
-    return;
-  }
-  const macAddress = document.querySelector('#modalMac').value.trim();
-  if (!portalToken && !/^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i.test(macAddress)) {
-    status.textContent = "Enter this device's Wi-Fi MAC address to receive paid access.";
+    payButton.disabled = false;
     return;
   }
   status.textContent = 'Starting your M-Pesa request...';
-  payButton.disabled = true;
   try {
-    const response = await fetch('/api/mpesa/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken, macAddress }) });
+    const response = await fetch('/api/mpesa/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Could not start payment.');
     status.textContent = 'Check your phone for the M-Pesa prompt. Approve it to activate your internet package.';
