@@ -11,7 +11,7 @@ Static customer portal and serverless M-Pesa billing application for Vercel. The
 
 ## M-Pesa billing
 
-Configure `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY`, and `MPESA_CALLBACK_URL=https://jixels-wifi-connect.vercel.app/api/mpesa/callback`. `MPESA_ENV=sandbox` uses Safaricom's sandbox; change to `production` only with live Daraja credentials and Safaricom approval. The browser does not decide price or payment state. Only a confirmed callback starts a paid session.
+Configure CloudPay in Vercel with `CLOUDPAY_CONSUMER_KEY`, `CLOUDPAY_CONSUMER_SECRET`, `CLOUDPAY_WEBHOOK_SECRET`, and `CLOUDPAY_ENV=sandbox`. In the CloudPay dashboard, set the payment webhook URL to `https://jixels-wifi-connect.vercel.app/api/cloudpay/webhook` and copy its signing secret into `CLOUDPAY_WEBHOOK_SECRET`. The browser does not decide price or payment state; only a valid signed CloudPay completion event for the exact amount starts a paid session. Switch `CLOUDPAY_ENV=production` only after sandbox checkout and webhook verification.
 
 ## Airtel 5G router captive portal
 

@@ -76,7 +76,7 @@ document.querySelector('#modalPay').onclick = async () => {
   }
   status.textContent = 'Starting your M-Pesa request...';
   try {
-    const response = await fetch('/api/mpesa/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken }) });
+    const response = await fetch('/api/payments/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Could not start payment.');
     status.textContent = 'Check your phone for the M-Pesa prompt. Approve it to activate your internet package.';
