@@ -274,7 +274,17 @@ window.addEventListener('beforeinstallprompt', event => {
 });
 window.addEventListener('appinstalled', () => { $('#installApp').hidden = true; });
 if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) $('#installApp').hidden = true;
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  let refreshingForWorkerUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshingForWorkerUpdate) return;
+    refreshingForWorkerUpdate = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+    .then(registration => registration.update())
+    .catch(() => {});
+}
 document.addEventListener('keydown', event => { if (event.key === 'Escape') setMenu(false); });
 
 const initialPage = document.querySelector(`.nav-link[href="${location.hash}"]`)?.dataset.page || 'overview';
