@@ -13,29 +13,39 @@ function setPaymentStatus(message, loading = false) {
   button.setAttribute('aria-busy', String(loading));
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const params = new URLSearchParams(location.search);
 const fas = params.get('fas');
 const mikrotikPortal = params.get('gateway') === 'mikrotik';
 if (fas) {
   history.replaceState({}, '', location.pathname);
-  portalReady = fetch('/api/opennds/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fas }) })
+  portalReady = fetchWithTimeout('/api/opennds/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fas }) })
     .then(async response => {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Hotspot session could not be verified.');
       portalToken = result.portalToken;
     })
-    .catch(error => { portalError = error.message; });
+    .catch(error => { portalError = error.name === 'AbortError' ? 'The hotspot check timed out. Reopen the captive portal and try again.' : error.message; });
 } else if (mikrotikPortal) {
   const clientMac = params.get('clientmac');
   const clientIp = params.get('clientip');
   history.replaceState({}, '', location.pathname);
-  portalReady = fetch('/api/mikrotik/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientMac, clientIp }) })
+  portalReady = fetchWithTimeout('/api/mikrotik/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientMac, clientIp }) })
     .then(async response => {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'The MikroTik hotspot could not verify this device.');
       portalToken = result.portalToken;
     })
-    .catch(error => { portalError = error.message; });
+    .catch(error => { portalError = error.name === 'AbortError' ? 'The hotspot check timed out. Reopen the captive portal and try again.' : error.message; });
 }
 
 function openPackage(item) {
@@ -86,41 +96,49 @@ async function loadPackages() {
   }
 }
 
-document.querySelector('.close').onclick = () => modal.close();
+document.querySelector('.close').addEventListener('click', () => modal.close());
 loadPackages();
 
-document.querySelector('#modalPay').onclick = async () => {
+document.querySelector('#paymentForm').addEventListener('submit', async event => {
+  event.preventDefault();
   const payButton = document.querySelector('#modalPay');
-  if (paymentState !== 'idle') return;
-  paymentState = 'verifying';
-  payButton.disabled = true;
-  payButton.textContent = 'Checking device...';
-  setPaymentStatus('Verifying the connected Wi-Fi device...', true);
-  await portalReady;
-  if (portalError) { paymentState = 'idle'; setPaymentStatus(portalError); payButton.textContent = `Pay ${fmt(selected.price_kes)}`; payButton.disabled = false; return; }
-  if (!portalToken) { paymentState = 'idle'; setPaymentStatus('Join Barrio- HOTSPOT and open its sign-in page to buy access for this device.'); payButton.textContent = `Pay ${fmt(selected.price_kes)}`; payButton.disabled = false; return; }
-  const phone = document.querySelector('#modalPhone').value.trim().replace(/[\s-]/g, '');
-  if (!/^(?:0(?:1|7)\d{8}|254(?:1|7)\d{8})$/.test(phone)) {
-    paymentState = 'idle';
-    setPaymentStatus('Enter a valid Kenyan M-Pesa number, starting with 01 or 07.');
-    payButton.textContent = `Pay ${fmt(selected.price_kes)}`;
-    payButton.disabled = false;
+  if (paymentState !== 'idle') {
+    setPaymentStatus(paymentState === 'pending' || paymentState === 'starting' || paymentState === 'verifying'
+      ? 'A payment request is already being processed. Check your phone and wait for its result.'
+      : 'This checkout attempt has already been used. Reopen the hotspot sign-in page to try again.');
     return;
   }
+  paymentState = 'verifying';
+  payButton.disabled = true;
+  payButton.textContent = 'Checking device…';
+  setPaymentStatus('Verifying the connected Wi-Fi device...', true);
+  const phone = document.querySelector('#modalPhone').value.trim().replace(/[\s-]/g, '');
+  const restorePayButton = message => {
+    paymentState = 'idle';
+    setPaymentStatus(message);
+    payButton.textContent = selected ? `Pay ${fmt(selected.price_kes)}` : 'Choose a package';
+    payButton.disabled = false;
+  };
+  if (!selected) { restorePayButton('Select an internet package before paying.'); return; }
+  if (!/^(?:0(?:1|7)\d{8}|254(?:1|7)\d{8})$/.test(phone)) {
+    restorePayButton('Enter a valid Kenyan M-Pesa number, starting with 01 or 07.');
+    document.querySelector('#modalPhone').focus();
+    return;
+  }
+  await portalReady;
+  if (portalError) { restorePayButton(portalError); return; }
+  if (!portalToken) { restorePayButton('Join Barrio- HOTSPOT and open its sign-in page to buy access for this device.'); return; }
   paymentState = 'starting';
   payButton.textContent = 'Starting payment...';
   setPaymentStatus('Starting your M-Pesa request...', true);
   try {
-    const response = await fetch('/api/payments/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken }) });
+    const response = await fetchWithTimeout('/api/payments/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken }) }, 20000);
     let result = {};
     try { result = await response.json(); } catch { /* preserve the HTTP result for safe retry handling */ }
     if (!response.ok) {
       const message = result.error || 'Could not start payment.';
       if (response.status < 500 || response.status === 503) {
-        paymentState = 'idle';
-        setPaymentStatus(message);
-        payButton.textContent = `Pay ${fmt(selected.price_kes)}`;
-        payButton.disabled = false;
+        restorePayButton(message);
         return;
       }
       paymentState = 'uncertain';
@@ -134,7 +152,9 @@ document.querySelector('#modalPay').onclick = async () => {
     const deadline = Date.now() + 5 * 60_000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 3000));
-      const check = await fetch(`/api/payments/status?token=${encodeURIComponent(result.statusToken)}`, { cache: 'no-store' });
+      let check;
+      try { check = await fetchWithTimeout(`/api/payments/status?token=${encodeURIComponent(result.statusToken)}`, { cache: 'no-store' }, 10000); }
+      catch { continue; }
       if (!check.ok) continue;
       const state = await check.json();
       if (state.status === 'FAILED') {
@@ -183,4 +203,4 @@ document.querySelector('#modalPay').onclick = async () => {
   } finally {
     payButton.disabled = paymentState !== 'idle';
   }
-};
+});

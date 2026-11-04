@@ -44,8 +44,10 @@
       <strong id="modalPrice"></strong>
       <p id="modalDescription"></p>
       <div class="choice selected"><b>Pay for this device</b><small>Access is activated for this connected device. Enter only the M-Pesa number for the payment prompt.</small></div>
-      <label>M-Pesa phone number<input id="modalPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="13" placeholder="07XXXXXXXX"></label>
-      <button class="modalPay" type="button" id="modalPay"></button>
+      <form id="paymentForm" novalidate>
+        <label>M-Pesa phone number<input id="modalPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="13" placeholder="07XXXXXXXX"></label>
+        <button class="modalPay" type="submit" id="modalPay"></button>
+      </form>
       <p id="modalStatus" aria-live="polite" aria-busy="false"><span id="modalStatusText">Your M-Pesa PIN is entered only in the official prompt on your phone - never here.</span></p>
     </section>
   </dialog>
