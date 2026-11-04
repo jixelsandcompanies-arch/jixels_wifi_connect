@@ -42,10 +42,14 @@ export default async function handler(req, res) {
   const statusToken = randomBytes(32).toString('hex');
   try {
     const accessToken = await cloudPayToken();
+    // M-Pesa's account reference is limited to 12 characters and the
+    // transaction description to 13. Longer values can be rejected before
+    // Safaricom sends the customer's STK prompt.
+    const transactionReference = `JX${randomBytes(5).toString('hex').toUpperCase()}`;
     const response = await fetch(`${cloudPayBase()}/payments/mpesa/stkpush`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: kenyaPhone(phone), amount: plan.price_kes, transactionReference: `JIX-${randomBytes(8).toString('hex').toUpperCase()}`, description: `Barrio Hotspot - ${plan.name}` })
+      body: JSON.stringify({ phone: kenyaPhone(phone), amount: plan.price_kes, transactionReference, description: 'WiFi access' })
     });
     const result = await response.json();
     const reference = result.data?.reference || result.reference;
