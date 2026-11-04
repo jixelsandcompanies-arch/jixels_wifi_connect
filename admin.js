@@ -3,7 +3,16 @@ const fmt = value => `KSh ${Number(value || 0).toLocaleString('en-KE')}`;
 const durationLabel = minutes => minutes === 90 ? '1 hr 30 min' : minutes % 1440 === 0 ? `${minutes / 1440} day${minutes === 1440 ? '' : 's'}` : minutes % 60 === 0 ? `${minutes / 60} hr${minutes === 60 ? '' : 's'}` : `${minutes} min`;
 const kenyaTime = value => value ? new Intl.DateTimeFormat('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '--';
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-let catalogue = [], breakdown = [], routerDevices = [], parentGateways = [], token = sessionStorage.getItem('jixelsAdminToken'), toastTimer, deferredInstallPrompt = null;
+function readAdminToken() {
+  try { return sessionStorage.getItem('jixelsAdminToken'); } catch { return null; }
+}
+function storeAdminToken(value) {
+  try { sessionStorage.setItem('jixelsAdminToken', value); } catch { /* keep the session in memory if storage is blocked */ }
+}
+function clearAdminToken() {
+  try { sessionStorage.removeItem('jixelsAdminToken'); } catch { /* storage may be blocked in captive browsers */ }
+}
+let catalogue = [], breakdown = [], routerDevices = [], parentGateways = [], token = readAdminToken(), toastTimer, deferredInstallPrompt = null;
 let currentAdminPage = 'overview';
 const authHeaders = () => token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -21,7 +30,7 @@ async function requestJson(url, options = {}) {
   let data;
   try { data = await response.json(); } catch { data = {}; }
   if (response.status === 401 || response.status === 403) {
-    sessionStorage.removeItem('jixelsAdminToken');
+    clearAdminToken();
     token = null;
     showLogin();
   }
@@ -49,7 +58,7 @@ function showLogin() {
     try {
       const data = await requestJson('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: $('#loginEmail').value.trim(), password: $('#loginPassword').value }) });
       token = data.accessToken;
-      sessionStorage.setItem('jixelsAdminToken', token);
+      storeAdminToken(token);
       $('.login').remove();
       await loadDashboard();
     } catch (exception) {
@@ -216,7 +225,8 @@ function openRouterEditor(device = null) {
   $('#routerEditor').showModal();
 }
 
-$('#connectionType').onchange = () => { $('#operatingMode').value = modeForConnection[$('#connectionType').value]; };
+const connectionTypeInput = $('#connectionType');
+if (connectionTypeInput) connectionTypeInput.onchange = () => { $('#operatingMode').value = modeForConnection[connectionTypeInput.value]; };
 $('#routerForm').onsubmit = async event => {
   event.preventDefault();
   const id = $('#routerId').value;
@@ -238,7 +248,8 @@ $('#routerForm').onsubmit = async event => {
   } finally { button.disabled = false; }
 };
 
-$('#routers').addEventListener('click', async event => {
+const routerTable = $('#routers');
+if (routerTable) routerTable.addEventListener('click', async event => {
   const button = event.target.closest('button[data-router-action]');
   if (!button) return;
   const device = routerDevices.find(item => item.id === button.dataset.id);
@@ -328,7 +339,8 @@ $('#form').onsubmit = event => {
   savePackage(item, id ? 'Package changes saved.' : 'Package created.');
 };
 
-$('#packages').addEventListener('click', async event => {
+const packagesTable = $('#packages');
+if (packagesTable) packagesTable.addEventListener('click', async event => {
   const button = event.target.closest('button[data-id]');
   if (!button) return;
   const item = catalogue.find(row => row.id === button.dataset.id);
@@ -382,40 +394,54 @@ document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('cl
   event.preventDefault();
   showAdminPage(link.dataset.page, true);
 }));
-$('.brand').addEventListener('click', event => { event.preventDefault(); showAdminPage('overview', true); });
+const brandLink = $('.brand');
+if (brandLink) brandLink.addEventListener('click', event => { event.preventDefault(); showAdminPage('overview', true); });
 window.addEventListener('popstate', () => {
   const page = document.querySelector(`.nav-link[href="${location.hash}"]`)?.dataset.page || 'overview';
   showAdminPage(page);
 });
-$('#menuToggle').onclick = () => setMenu(!$('#sidebar').classList.contains('open'));
-$('#sidebarBackdrop').onclick = () => setMenu(false);
-$('#refresh').onclick = () => currentAdminPage === 'routers' ? loadRouterInventory() : loadDashboard();
+const menuToggle = $('#menuToggle');
+if (menuToggle) menuToggle.onclick = () => setMenu(!$('#sidebar').classList.contains('open'));
+const sidebarBackdrop = $('#sidebarBackdrop');
+if (sidebarBackdrop) sidebarBackdrop.onclick = () => setMenu(false);
+const refreshButton = $('#refresh');
+if (refreshButton) refreshButton.onclick = () => currentAdminPage === 'routers' ? loadRouterInventory() : loadDashboard();
 const checkCloudPayButton = $('#checkCloudPay');
 if (checkCloudPayButton) checkCloudPayButton.onclick = checkCloudPay;
-$('#add').onclick = () => openEditor();
-$('#addRouter').onclick = () => openRouterEditor();
-$('#cancel').onclick = () => $('#editor').close();
-$('#cancelBottom').onclick = () => $('#editor').close();
-$('#closeRouterEditor').onclick = () => $('#routerEditor').close();
-$('#cancelRouter').onclick = () => $('#routerEditor').close();
-$('#packageSearch').oninput = renderPackages;
-$('#packageFilter').onchange = renderPackages;
-$('#logout').onclick = () => { sessionStorage.removeItem('jixelsAdminToken'); token = null; showLogin(); };
-$('#installApp').onclick = async () => {
+const addButton = $('#add');
+if (addButton) addButton.onclick = () => openEditor();
+const addRouterButton = $('#addRouter');
+if (addRouterButton) addRouterButton.onclick = () => openRouterEditor();
+const cancelButton = $('#cancel');
+if (cancelButton) cancelButton.onclick = () => $('#editor').close();
+const cancelBottomButton = $('#cancelBottom');
+if (cancelBottomButton) cancelBottomButton.onclick = () => $('#editor').close();
+const closeRouterEditorButton = $('#closeRouterEditor');
+if (closeRouterEditorButton) closeRouterEditorButton.onclick = () => $('#routerEditor').close();
+const cancelRouterButton = $('#cancelRouter');
+if (cancelRouterButton) cancelRouterButton.onclick = () => $('#routerEditor').close();
+const packageSearchInput = $('#packageSearch');
+if (packageSearchInput) packageSearchInput.oninput = renderPackages;
+const packageFilterSelect = $('#packageFilter');
+if (packageFilterSelect) packageFilterSelect.onchange = renderPackages;
+const logoutButton = $('#logout');
+if (logoutButton) logoutButton.onclick = () => { clearAdminToken(); token = null; showLogin(); };
+const installAppButton = $('#installApp');
+if (installAppButton) installAppButton.onclick = async () => {
   if (!deferredInstallPrompt) {
     notify('To install, use your browser menu and choose Install app or Add to Home screen.');
     return;
   }
   deferredInstallPrompt.prompt();
   const choice = await deferredInstallPrompt.userChoice;
-  if (choice.outcome === 'accepted') $('#installApp').hidden = true;
+  if (choice.outcome === 'accepted') installAppButton.hidden = true;
   deferredInstallPrompt = null;
 };
 window.addEventListener('beforeinstallprompt', event => {
   event.preventDefault();
   deferredInstallPrompt = event;
 });
-window.addEventListener('appinstalled', () => { $('#installApp').hidden = true; });
+window.addEventListener('appinstalled', () => { const installButton = $('#installApp'); if (installButton) installButton.hidden = true; });
 if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) $('#installApp').hidden = true;
 if ('serviceWorker' in navigator) {
   let refreshingForWorkerUpdate = false;
