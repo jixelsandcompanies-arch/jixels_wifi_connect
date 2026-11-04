@@ -7,8 +7,10 @@ let paymentState = 'idle';
 
 function setPaymentStatus(message, loading = false) {
   document.querySelector('#modalStatusText').textContent = message;
-  document.querySelector('#paymentSpinner').hidden = !loading;
   document.querySelector('#modalStatus').setAttribute('aria-busy', String(loading));
+  const button = document.querySelector('#modalPay');
+  button.classList.toggle('is-loading', loading);
+  button.setAttribute('aria-busy', String(loading));
 }
 
 const params = new URLSearchParams(location.search);
