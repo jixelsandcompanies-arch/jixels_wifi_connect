@@ -58,6 +58,10 @@ function showLogin() {
   };
 }
 
+// Show the sign-in form before later UI bindings run, so a stale cached page
+// cannot leave the admin shell hidden if one of its optional controls is absent.
+if (!token) showLogin();
+
 function renderMetrics(metrics) {
   const items = [
     ['Revenue today', fmt(metrics.todayRevenue), 'Confirmed M-Pesa payments'],
@@ -386,7 +390,8 @@ window.addEventListener('popstate', () => {
 $('#menuToggle').onclick = () => setMenu(!$('#sidebar').classList.contains('open'));
 $('#sidebarBackdrop').onclick = () => setMenu(false);
 $('#refresh').onclick = () => currentAdminPage === 'routers' ? loadRouterInventory() : loadDashboard();
-$('#checkCloudPay').onclick = checkCloudPay;
+const checkCloudPayButton = $('#checkCloudPay');
+if (checkCloudPayButton) checkCloudPayButton.onclick = checkCloudPay;
 $('#add').onclick = () => openEditor();
 $('#addRouter').onclick = () => openRouterEditor();
 $('#cancel').onclick = () => $('#editor').close();
