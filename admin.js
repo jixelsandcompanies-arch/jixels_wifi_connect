@@ -133,6 +133,23 @@ async function loadDashboard() {
   }
 }
 
+async function checkCloudPay() {
+  const button = $('#checkCloudPay');
+  const status = $('#cloudPayHealthStatus');
+  button.disabled = true;
+  button.textContent = 'Checking...';
+  status.textContent = 'Checking CloudPay OAuth...';
+  try {
+    const result = await requestJson('/api/admin/cloudpay-health', { headers: authHeaders(), cache: 'no-store' });
+    status.textContent = `Connected to CloudPay ${result.environment}. Credentials accepted.`;
+  } catch (error) {
+    status.textContent = error.message || 'CloudPay authentication check failed.';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Check CloudPay';
+  }
+}
+
 const connectionLabels = { ETHERNET: 'Ethernet connection', WIRELESS_BRIDGE: 'Wireless bridge', WIRELESS_REPEATER: 'Wireless repeater', ACCESS_POINT: 'Access Point mode' };
 const modeLabels = { AP_BRIDGE: 'Access point / bridge', WIRELESS_BRIDGE: 'Wireless client bridge', REPEATER_BRIDGE: 'Repeater bridge' };
 const modeForConnection = { ETHERNET: 'AP_BRIDGE', ACCESS_POINT: 'AP_BRIDGE', WIRELESS_BRIDGE: 'WIRELESS_BRIDGE', WIRELESS_REPEATER: 'REPEATER_BRIDGE' };
@@ -369,6 +386,7 @@ window.addEventListener('popstate', () => {
 $('#menuToggle').onclick = () => setMenu(!$('#sidebar').classList.contains('open'));
 $('#sidebarBackdrop').onclick = () => setMenu(false);
 $('#refresh').onclick = () => currentAdminPage === 'routers' ? loadRouterInventory() : loadDashboard();
+$('#checkCloudPay').onclick = checkCloudPay;
 $('#add').onclick = () => openEditor();
 $('#addRouter').onclick = () => openRouterEditor();
 $('#cancel').onclick = () => $('#editor').close();
