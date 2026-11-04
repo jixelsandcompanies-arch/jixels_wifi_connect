@@ -2,7 +2,7 @@
   "id": "/admin.html",
   "name": "Barrio- HOTSPOT Admin",
   "short_name": "Barrio Admin",
-  "description": "Manage Barrio- HOTSPOT packages, customer sessions, and payments.",
+  "description": "Manage Barrio- HOTSPOT packages, customer sessions, payments, and router inventory.",
   "start_url": "/admin.html",
   "scope": "/",
   "display": "standalone",

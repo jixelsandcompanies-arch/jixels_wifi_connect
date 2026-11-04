@@ -48,7 +48,7 @@ function Apply-Command($Command) {
     }
   } elseif ($Command.action -eq 'BLOCK') {
     $active = @(Invoke-RouterRest -Path 'ip/hotspot/active')
-    foreach ($client in ($active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac })) {
+    foreach ($client in ($active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac -and $_.user -eq $Command.hotspot_username })) {
       $encodedId = [Uri]::EscapeDataString([string]$client.'.id')
       Invoke-RouterRest -Path "ip/hotspot/active/$encodedId" -Method Delete | Out-Null
     }
@@ -75,6 +75,14 @@ while ($true) {
         Write-Warning "Command $($command.id) failed and will retry: $($_.Exception.Message)"
       }
     }
-  } catch { Write-Warning "MikroTik agent poll failed: $($_.Exception.Message)" }
+  } catch {
+    $statusCode = 0
+    try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { }
+    if ($statusCode -eq 401) {
+      Write-Warning 'Vercel rejected this agent before any RouterOS command ran. Check that Production has WIFI_GATEWAY_MODE=mikrotik-agent, MIKROTIK_AGENT_TOKEN exactly matches this PC, MIKROTIK_CREDENTIAL_SECRET is set, and MIKROTIK_HOTSPOT_LOGIN_URL is a private router login URL. Restart the agent after correcting Vercel settings.'
+      break
+    }
+    Write-Warning "MikroTik agent poll failed: $($_.Exception.Message)"
+  }
   Start-Sleep -Seconds 8
 }

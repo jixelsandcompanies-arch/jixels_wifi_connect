@@ -1,4 +1,4 @@
-const CACHE_NAME = 'barrio-admin-v3';
+const CACHE_NAME = 'barrio-admin-v4';
 const APP_FILES = [
   '/admin.html',
   '/admin.css',

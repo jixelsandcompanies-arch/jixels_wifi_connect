@@ -15,7 +15,8 @@ async function activate(db, payment, payload) {
   const start = payment.confirmed_at ? new Date(payment.confirmed_at) : new Date();
   const expiry = expiryFrom(payment.wifi_packages, start);
   if (payment.status === 'PENDING') {
-    await db.from('payments').update({ status: 'SUCCESS', mpesa_receipt_number: payload.receipt || null, raw_callback: payload, confirmed_at: start.toISOString() }).eq('id', payment.id).eq('status', 'PENDING');
+    const { error } = await db.from('payments').update({ status: 'SUCCESS', mpesa_receipt_number: payload.receipt || null, raw_callback: payload, confirmed_at: start.toISOString() }).eq('id', payment.id).eq('status', 'PENDING');
+    if (error) throw error;
   }
 
   let { data: session } = await db.from('wifi_sessions').select('*').eq('payment_id', payment.id).maybeSingle();
@@ -24,6 +25,7 @@ async function activate(db, payment, payload) {
     if (error) session = (await db.from('wifi_sessions').select('*').eq('payment_id', payment.id).maybeSingle()).data;
     else session = data;
   }
+  if (!session) throw new Error('Could not create or load the paid Wi-Fi session');
   if (!session || ['ACTIVE', 'EXPIRED', 'REVOKED'].includes(session.session_status)) return;
   if (session.session_status === 'GATEWAY_FAILED') {
     await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' }).eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
@@ -70,13 +72,19 @@ export default async function handler(req, res) {
   if (!payment) return res.status(503).send('Payment record not ready; retry webhook');
   if (payment.status === 'FAILED') return res.status(200).send('Already processed');
 
+  const expectedEvent = event.status === 'COMPLETED' ? 'payment.completed' : 'payment.failed';
+  if (event.event !== expectedEvent || event.channel !== 'MPESA' || event.currency !== 'KES' || Number(event.amount) !== Number(payment.amount_kes)) {
+    return res.status(400).send('Payment details did not match');
+  }
+
   if (event.status !== 'COMPLETED') {
     if (payment.status !== 'PENDING') return res.status(200).send('Already completed');
-    await db.from('payments').update({ status: 'FAILED', raw_callback: event }).eq('id', payment.id).eq('status', 'PENDING');
+    const { error } = await db.from('payments').update({ status: 'FAILED', raw_callback: event }).eq('id', payment.id).eq('status', 'PENDING');
+    if (error) return res.status(503).send('Could not record payment result; retry webhook');
     return res.status(200).send('Accepted');
   }
-  if (event.event !== 'payment.completed' || event.channel !== 'MPESA' || event.currency !== 'KES' || Number(event.amount) !== Number(payment.amount_kes)) return res.status(400).send('Payment details did not match');
 
-  await activate(db, payment, event);
+  try { await activate(db, payment, event); }
+  catch { return res.status(503).send('Could not record payment result; retry webhook'); }
   return res.status(200).send('Accepted');
 }

@@ -2,9 +2,10 @@ import { supabase } from '../../lib/supabase.js';
 import { isGatewayConfigured, isMikrotikAgentMode, isMikrotikAgentOnline, isTyraxAgentMode } from '../../lib/gateway.js';
 import { createHash, randomBytes } from 'node:crypto';
 
-const cloudPayBase = () => process.env.CLOUDPAY_ENV === 'production'
+const cloudPayEnvironment = () => process.env.CLOUDPAY_ENV || '';
+const cloudPayBase = () => cloudPayEnvironment() === 'production'
   ? 'https://pay.cloud.or.ke/api'
-  : 'https://pay.cloud.or.ke/sandbox/api';
+  : cloudPayEnvironment() === 'sandbox' ? 'https://pay.cloud.or.ke/sandbox/api' : null;
 const kenyaPhone = phone => String(phone || '').replace(/\D/g, '').replace(/^0/, '254');
 
 async function cloudPayToken() {
@@ -20,6 +21,7 @@ async function cloudPayToken() {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const { packageId, phone, portalToken } = req.body || {};
+  if (!cloudPayBase()) return res.status(503).json({ error: 'CloudPay mode is not configured. Set CLOUDPAY_ENV explicitly to production or sandbox.' });
   if (!process.env.CLOUDPAY_CONSUMER_KEY || !process.env.CLOUDPAY_CONSUMER_SECRET || !process.env.CLOUDPAY_WEBHOOK_SECRET) return res.status(503).json({ error: 'CloudPay is not configured yet. Contact the Wi-Fi administrator.' });
   if (!isGatewayConfigured()) return res.status(503).json({ error: 'Wi-Fi access activation is not configured for this router yet. Please contact the Wi-Fi administrator.' });
   if (isTyraxAgentMode()) return res.status(503).json({ error: 'Phone-only device identification requires the openNDS captive portal. The TYRAX router agent cannot identify a device from a phone number.' });

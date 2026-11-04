@@ -1,1 +1,1 @@
-{"name":"jixels-rural-wifi","private":true,"type":"module","scripts":{"test":"node --test tests/*.test.js"},"dependencies":{"@supabase/supabase-js":"^2.49.1"}}
+{"name":"jixels-rural-wifi","private":true,"type":"module","scripts":{"test":"node --test tests/*.test.js"},"dependencies":{"@supabase/supabase-js":"^2.49.1"},"devDependencies":{"supabase":"^3.0.0","vercel":"^65.11.0"}}

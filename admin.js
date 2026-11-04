@@ -3,7 +3,8 @@ const fmt = value => `KSh ${Number(value || 0).toLocaleString('en-KE')}`;
 const durationLabel = minutes => minutes === 90 ? '1 hr 30 min' : minutes % 1440 === 0 ? `${minutes / 1440} day${minutes === 1440 ? '' : 's'}` : minutes % 60 === 0 ? `${minutes / 60} hr${minutes === 60 ? '' : 's'}` : `${minutes} min`;
 const kenyaTime = value => value ? new Intl.DateTimeFormat('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '--';
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-let catalogue = [], breakdown = [], token = sessionStorage.getItem('jixelsAdminToken'), toastTimer, deferredInstallPrompt = null;
+let catalogue = [], breakdown = [], routerDevices = [], parentGateways = [], token = sessionStorage.getItem('jixelsAdminToken'), toastTimer, deferredInstallPrompt = null;
+let currentAdminPage = 'overview';
 const authHeaders = () => token ? { Authorization: `Bearer ${token}` } : {};
 
 function notify(message, isError = false) {
@@ -132,6 +133,119 @@ async function loadDashboard() {
   }
 }
 
+const connectionLabels = { ETHERNET: 'Ethernet connection', WIRELESS_BRIDGE: 'Wireless bridge', WIRELESS_REPEATER: 'Wireless repeater', ACCESS_POINT: 'Access Point mode' };
+const modeLabels = { AP_BRIDGE: 'Access point / bridge', WIRELESS_BRIDGE: 'Wireless client bridge', REPEATER_BRIDGE: 'Repeater bridge' };
+const modeForConnection = { ETHERNET: 'AP_BRIDGE', ACCESS_POINT: 'AP_BRIDGE', WIRELESS_BRIDGE: 'WIRELESS_BRIDGE', WIRELESS_REPEATER: 'REPEATER_BRIDGE' };
+
+function renderRouterInventory(data) {
+  routerDevices = Array.isArray(data.routers) ? data.routers : [];
+  parentGateways = Array.isArray(data.parentGateways) ? data.parentGateways : [];
+  const rows = $('#routers');
+  $('#gatewayNotice').textContent = data.configuredGateway
+    ? `Central gateway: ${data.configuredGateway.gateway_name} (${data.configuredGateway.gateway_id}). Agent heartbeat: ${data.agentHeartbeat === 'RECENT' ? 'recent' : data.agentHeartbeat === 'STALE' ? 'stale' : 'not seen'}. A recent heartbeat confirms the agent contacted Jixels; it does not verify router or access point connectivity.`
+    : 'No central MikroTik gateway is configured in this deployment. Access points cannot be registered until the gateway is configured.';
+  $('#addRouter').disabled = parentGateways.length === 0;
+  if (!routerDevices.length) {
+    rows.innerHTML = '<tr><td colspan="8" class="table-message">No routers or access points are registered.</td></tr>';
+    return;
+  }
+  rows.innerHTML = routerDevices.map(device => {
+    const status = 'Not verified';
+    const statusClassName = 'inactive';
+    return `<tr>
+      <td><span class="package-name">${escapeHtml(device.router_name)}</span></td>
+      <td>${escapeHtml(device.router_ip)}<small class="router-mac">${escapeHtml(device.router_mac)}</small></td>
+      <td>${escapeHtml(connectionLabels[device.connection_type] || device.connection_type)}</td>
+      <td>${escapeHtml(modeLabels[device.operating_mode] || device.operating_mode)}</td>
+      <td>${escapeHtml(device.mikrotik_gateways?.gateway_name || device.parent_gateway_id)}</td>
+      <td><span class="status-pill ${device.is_enabled ? '' : 'inactive'}">${device.is_enabled ? 'Enabled' : 'Disabled'}</span></td>
+      <td><span class="status-pill ${statusClassName}">${status}</span></td>
+      <td><button class="action-button" type="button" data-router-action="edit" data-id="${escapeHtml(device.id)}">Edit</button> <button class="action-button" type="button" data-router-action="toggle" data-id="${escapeHtml(device.id)}">${device.is_enabled ? 'Disable' : 'Enable'}</button> <button class="action-button" type="button" data-router-action="remove" data-id="${escapeHtml(device.id)}">Remove</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadRouterInventory() {
+  const rows = $('#routers');
+  rows.innerHTML = '<tr><td colspan="8" class="table-message">Loading router inventory...</td></tr>';
+  try {
+    const data = await requestJson('/api/admin/routers', { headers: authHeaders(), cache: 'no-store' });
+    renderRouterInventory(data);
+  } catch (exception) {
+    $('#gatewayNotice').textContent = 'Router inventory is unavailable. Apply migration 008 and confirm the central MikroTik gateway settings.';
+    rows.innerHTML = `<tr><td colspan="8" class="table-message">${escapeHtml(exception.message)}</td></tr>`;
+  }
+}
+
+function openRouterEditor(device = null) {
+  const form = $('#routerForm');
+  form.reset();
+  $('#routerId').value = device?.id || '';
+  $('#routerName').value = device?.router_name || '';
+  $('#routerMac').value = device?.router_mac || '';
+  $('#routerIp').value = device?.router_ip || '';
+  $('#connectionType').value = device?.connection_type || 'ETHERNET';
+  $('#operatingMode').value = device?.operating_mode || modeForConnection[$('#connectionType').value];
+  $('#routerEnabled').checked = device ? Boolean(device.is_enabled) : true;
+  $('#parentGateway').innerHTML = parentGateways.map(gateway => `<option value="${escapeHtml(gateway.gateway_id)}">${escapeHtml(gateway.gateway_name)} (${escapeHtml(gateway.gateway_id)})</option>`).join('');
+  if (device) $('#parentGateway').value = device.parent_gateway_id;
+  $('#routerError').textContent = '';
+  $('#routerEditorTitle').textContent = device ? 'Edit router or access point' : 'Register router or access point';
+  $('#saveRouter').textContent = device ? 'Save changes' : 'Register device';
+  $('#routerEditor').showModal();
+}
+
+$('#connectionType').onchange = () => { $('#operatingMode').value = modeForConnection[$('#connectionType').value]; };
+$('#routerForm').onsubmit = async event => {
+  event.preventDefault();
+  const id = $('#routerId').value;
+  const payload = {
+    routerName: $('#routerName').value.trim(), routerMac: $('#routerMac').value.trim(), routerIp: $('#routerIp').value.trim(),
+    connectionType: $('#connectionType').value, operatingMode: $('#operatingMode').value,
+    parentGatewayId: $('#parentGateway').value, isEnabled: $('#routerEnabled').checked,
+    ...(id ? { id } : {})
+  };
+  const button = $('#saveRouter');
+  button.disabled = true;
+  try {
+    await requestJson('/api/admin/routers', { method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+    $('#routerEditor').close();
+    notify(id ? 'Router details updated.' : 'Router registered. Its connection is not yet verified.');
+    await loadRouterInventory();
+  } catch (exception) {
+    $('#routerError').textContent = exception.message || 'Router could not be saved.';
+  } finally { button.disabled = false; }
+};
+
+$('#routers').addEventListener('click', async event => {
+  const button = event.target.closest('button[data-router-action]');
+  if (!button) return;
+  const device = routerDevices.find(item => item.id === button.dataset.id);
+  if (!device) return;
+  if (button.dataset.routerAction === 'edit') return openRouterEditor(device);
+  if (button.dataset.routerAction === 'remove') {
+    if (!window.confirm(`Remove ${device.router_name} from the inventory? This will not change the physical router.`)) return;
+    button.disabled = true;
+    try {
+      await requestJson(`/api/admin/routers?id=${encodeURIComponent(device.id)}`, { method: 'DELETE', headers: authHeaders() });
+      notify('Router removed from inventory.');
+      await loadRouterInventory();
+    } catch (exception) { notify(exception.message || 'Router could not be removed.', true); button.disabled = false; }
+    return;
+  }
+  if (button.dataset.routerAction === 'toggle') {
+    button.disabled = true;
+    try {
+      await requestJson('/api/admin/routers', { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({
+        id: device.id, routerName: device.router_name, routerMac: device.router_mac, routerIp: device.router_ip,
+        connectionType: device.connection_type, operatingMode: device.operating_mode, parentGatewayId: device.parent_gateway_id, isEnabled: !device.is_enabled
+      }) });
+      notify(device.is_enabled ? 'Router disabled in inventory.' : 'Router enabled in inventory.');
+      await loadRouterInventory();
+    } catch (exception) { notify(exception.message || 'Router could not be updated.', true); button.disabled = false; }
+  }
+});
+
 function openEditor(item = null) {
   const form = $('#form');
   form.reset();
@@ -216,11 +330,13 @@ const adminPages = {
   overview: ['Overview', 'BUSINESS MANAGEMENT', 'Monitor your hotspot and billing activity.'],
   packages: ['Packages', 'CUSTOMER PLANS', 'Create packages, update prices, and control availability.'],
   sessions: ['Sessions', 'CUSTOMER ACCESS', 'Review recent Wi-Fi sessions and their status.'],
-  revenue: ['Payments & revenue', 'BILLING REPORTS', 'Track confirmed payments and package sales.']
+  revenue: ['Payments & revenue', 'BILLING REPORTS', 'Track confirmed payments and package sales.'],
+  routers: ['Router Management', 'NETWORK DEVICES', 'Register and review access points connected to the central MikroTik gateway.']
 };
 
 function showAdminPage(page, updateHistory = false) {
   if (!adminPages[page]) page = 'overview';
+  currentAdminPage = page;
   document.querySelectorAll('[data-page-view]').forEach(view => {
     const active = view.dataset.pageView === page;
     view.hidden = !active;
@@ -238,6 +354,7 @@ function showAdminPage(page, updateHistory = false) {
   $('#pageDescription').textContent = description;
   if (updateHistory) history.pushState({ adminPage: page }, '', `#${page}Page`);
   setMenu(false);
+  if (page === 'routers' && token) loadRouterInventory();
 }
 
 document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', event => {
@@ -251,10 +368,13 @@ window.addEventListener('popstate', () => {
 });
 $('#menuToggle').onclick = () => setMenu(!$('#sidebar').classList.contains('open'));
 $('#sidebarBackdrop').onclick = () => setMenu(false);
-$('#refresh').onclick = loadDashboard;
+$('#refresh').onclick = () => currentAdminPage === 'routers' ? loadRouterInventory() : loadDashboard();
 $('#add').onclick = () => openEditor();
+$('#addRouter').onclick = () => openRouterEditor();
 $('#cancel').onclick = () => $('#editor').close();
 $('#cancelBottom').onclick = () => $('#editor').close();
+$('#closeRouterEditor').onclick = () => $('#routerEditor').close();
+$('#cancelRouter').onclick = () => $('#routerEditor').close();
 $('#packageSearch').oninput = renderPackages;
 $('#packageFilter').onchange = renderPackages;
 $('#logout').onclick = () => { sessionStorage.removeItem('jixelsAdminToken'); token = null; showLogin(); };

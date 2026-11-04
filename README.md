@@ -13,7 +13,7 @@ The admin portal is installable as a PWA from `/admin.html`. After signing in, u
 
 ## M-Pesa billing
 
-Configure CloudPay in Vercel with `CLOUDPAY_CONSUMER_KEY`, `CLOUDPAY_CONSUMER_SECRET`, `CLOUDPAY_WEBHOOK_SECRET`, and `CLOUDPAY_ENV=sandbox`. In the CloudPay dashboard, set the payment webhook URL to `https://jixels-wifi-connect.vercel.app/api/cloudpay/webhook` and copy its signing secret into `CLOUDPAY_WEBHOOK_SECRET`. The browser does not decide price or payment state; only a valid signed CloudPay completion event for the exact amount starts a paid session. Switch `CLOUDPAY_ENV=production` only after sandbox checkout and webhook verification.
+Configure CloudPay in Vercel with `CLOUDPAY_CONSUMER_KEY`, `CLOUDPAY_CONSUMER_SECRET`, `CLOUDPAY_WEBHOOK_SECRET`, and an explicit `CLOUDPAY_ENV`. Use `sandbox` only with CloudPay sandbox credentials for test transactions; set `production` with production credentials for live payments. The API now fails closed if the environment is unset or invalid instead of silently using the sandbox. In the CloudPay dashboard, set the payment webhook URL to `https://jixels-wifi-connect.vercel.app/api/cloudpay/webhook` and copy its signing secret into `CLOUDPAY_WEBHOOK_SECRET`. The browser does not decide price or payment state; only a valid signed CloudPay completion event for the exact amount starts a paid session. The legacy unsigned `/api/mpesa/callback` endpoint is retired; use only `/api/cloudpay/webhook`.
 
 ## Airtel 5G router captive portal
 
@@ -53,6 +53,10 @@ $MikrotikCredentialSecret = [BitConverter]::ToString($secretBytes).Replace('-', 
 ```
 
 Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and limit it to hotspot user/active operations and the agent PC. The agent validates that MikroTik still sees the checkout IP and MAC together before it creates access. RouterOS `limit-uptime` removes the paid session at expiry; the agent also removes active sessions and temporary users when the expiry job runs. The app polls this agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
+
+### Additional access point inventory
+
+Apply `008_router_registry.sql` after migration `007` to enable **Router Management** in `/admin.html`. The migration adds an admin-only inventory and a parent reference to the configured central MikroTik gateway; it does not change hotspot, payment, package, or session data. The admin API registers Ethernet access points, wireless bridges, and repeater bridges as inventory records only. Use AP/bridge mode with DHCP/NAT disabled on the additional device so customer traffic continues through the MikroTik. Router/NAT and independent captive-portal modes are not supported by this integration. Inventory status remains **Not verified** because the application does not probe ordinary access points. A recent agent heartbeat only means the local agent contacted Jixels; it does not prove the MikroTik or an access point is reachable.
 
 This MikroTik path requires the Tenda to be an access point behind the MikroTik. A Tenda connected directly to Airtel, or left routing with its own DHCP, bypasses the HotSpot gateway. Phone tethering through an already-authorized device cannot be reliably blocked by MAC-based HotSpot control.
 

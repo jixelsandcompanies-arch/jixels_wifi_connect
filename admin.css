@@ -6,6 +6,8 @@
 
 @media(max-width:760px){.editor-dialog{max-height:calc(100dvh - 20px);overflow:auto}.editor-dialog input,.editor-dialog select,.editor-dialog textarea,.search-box input,.filter-box select{font-size:16px}.button,.action-button,.icon-button,.menu-toggle{min-height:44px}.table-wrap{overscroll-behavior-x:contain}}
 
+.nav-router-icon svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.router-notice{margin:12px 0;padding:12px 14px;border:1px solid #dce5f0;border-radius:9px;background:#f7f9fc;color:#58677d;font-size:12px}.router-mac{display:block;margin-top:3px;color:var(--muted);font-size:10px}.status-pill.inactive{background:#f1f2f4;color:#7f8794}
+
 /* Use plain, regular text throughout the billing UI. */
 body, body * { font-family: Arial, Helvetica, sans-serif !important; font-style: normal !important; font-weight: 400 !important; letter-spacing: normal !important; text-transform: none !important; text-decoration: none !important; }
 

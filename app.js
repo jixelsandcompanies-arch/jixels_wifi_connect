@@ -3,6 +3,13 @@ const modal = document.querySelector('#purchaseModal');
 const fmt = value => `KSh ${Number(value).toLocaleString('en-KE')}`;
 const duration = minutes => minutes === 90 ? '1 hour 30 minutes' : minutes >= 1440 ? `${minutes / 1440} days` : minutes >= 60 ? `${minutes / 60} hours` : `${minutes} minutes`;
 let selected, portalToken = null, portalError = null, portalReady = Promise.resolve();
+let paymentState = 'idle';
+
+function setPaymentStatus(message, loading = false) {
+  document.querySelector('#modalStatusText').textContent = message;
+  document.querySelector('#paymentSpinner').hidden = !loading;
+  document.querySelector('#modalStatus').setAttribute('aria-busy', String(loading));
+}
 
 const params = new URLSearchParams(location.search);
 const fas = params.get('fas');
@@ -35,8 +42,15 @@ function openPackage(item) {
   document.querySelector('#modalName').textContent = item.name;
   document.querySelector('#modalPrice').textContent = fmt(item.price_kes);
   document.querySelector('#modalDescription').textContent = `Internet access for ${duration(item.duration_minutes)}`;
-  document.querySelector('#modalPay').textContent = `Pay ${fmt(item.price_kes)}`;
-  document.querySelector('#modalStatus').textContent = 'Enter your M-Pesa PIN only in the official prompt on your phone. Never share it here.';
+  const payButton = document.querySelector('#modalPay');
+  if (paymentState === 'idle') {
+    payButton.disabled = false;
+    payButton.textContent = `Pay ${fmt(item.price_kes)}`;
+    setPaymentStatus('Enter your M-Pesa PIN only in the official prompt on your phone. Never share it here.');
+  } else {
+    payButton.disabled = true;
+    payButton.textContent = paymentState === 'pending' || paymentState === 'starting' ? 'Payment in progress' : paymentState === 'confirmed' ? 'Payment confirmed' : 'Payment already submitted';
+  }
   modal.showModal();
 }
 
@@ -74,34 +88,63 @@ document.querySelector('.close').onclick = () => modal.close();
 loadPackages();
 
 document.querySelector('#modalPay').onclick = async () => {
-  const status = document.querySelector('#modalStatus');
   const payButton = document.querySelector('#modalPay');
+  if (paymentState !== 'idle') return;
+  paymentState = 'verifying';
   payButton.disabled = true;
-  status.textContent = 'Verifying the connected Wi-Fi device...';
+  payButton.textContent = 'Checking device...';
+  setPaymentStatus('Verifying the connected Wi-Fi device...', true);
   await portalReady;
-  if (portalError) { status.textContent = portalError; payButton.disabled = false; return; }
-  if (!portalToken) { status.textContent = 'Join Barrio- HOTSPOT and open its sign-in page to buy access for this device.'; payButton.disabled = false; return; }
+  if (portalError) { paymentState = 'idle'; setPaymentStatus(portalError); payButton.textContent = `Pay ${fmt(selected.price_kes)}`; payButton.disabled = false; return; }
+  if (!portalToken) { paymentState = 'idle'; setPaymentStatus('Join Barrio- HOTSPOT and open its sign-in page to buy access for this device.'); payButton.textContent = `Pay ${fmt(selected.price_kes)}`; payButton.disabled = false; return; }
   const phone = document.querySelector('#modalPhone').value.trim().replace(/[\s-]/g, '');
   if (!/^(?:0(?:1|7)\d{8}|254(?:1|7)\d{8})$/.test(phone)) {
-    status.textContent = 'Enter a valid Kenyan M-Pesa number, starting with 01 or 07.';
+    paymentState = 'idle';
+    setPaymentStatus('Enter a valid Kenyan M-Pesa number, starting with 01 or 07.');
+    payButton.textContent = `Pay ${fmt(selected.price_kes)}`;
     payButton.disabled = false;
     return;
   }
-  status.textContent = 'Starting your M-Pesa request...';
+  paymentState = 'starting';
+  payButton.textContent = 'Starting payment...';
+  setPaymentStatus('Starting your M-Pesa request...', true);
   try {
     const response = await fetch('/api/payments/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken }) });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not start payment.');
-    status.textContent = 'Check your phone for the M-Pesa prompt. Approve it to activate your internet package.';
+    let result = {};
+    try { result = await response.json(); } catch { /* preserve the HTTP result for safe retry handling */ }
+    if (!response.ok) {
+      const message = result.error || 'Could not start payment.';
+      if (response.status < 500 || response.status === 503) {
+        paymentState = 'idle';
+        setPaymentStatus(message);
+        payButton.textContent = `Pay ${fmt(selected.price_kes)}`;
+        payButton.disabled = false;
+        return;
+      }
+      paymentState = 'uncertain';
+      payButton.textContent = 'Check payment status';
+      setPaymentStatus(`${message} Check your phone before trying again. Do not submit another payment until you know whether this request started.`);
+      return;
+    }
+    paymentState = 'pending';
+    payButton.textContent = 'Payment in progress';
+    setPaymentStatus('Check your phone for the M-Pesa prompt. Approve it to activate your internet package.', true);
     const deadline = Date.now() + 5 * 60_000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 3000));
       const check = await fetch(`/api/payments/status?token=${encodeURIComponent(result.statusToken)}`, { cache: 'no-store' });
       if (!check.ok) continue;
       const state = await check.json();
-      if (state.status === 'FAILED') { status.textContent = 'Payment was not completed. You can try again.'; break; }
+      if (state.status === 'FAILED') {
+        paymentState = 'failed';
+        payButton.textContent = 'Payment not completed';
+        setPaymentStatus('Payment was not completed. Reopen the hotspot sign-in page before starting another attempt.');
+        break;
+      }
       if (state.status === 'SUCCESS' && state.session === 'ACTIVE' && state.mikrotikLogin) {
-        status.textContent = 'Payment confirmed. Signing this device in to the hotspot...';
+        paymentState = 'confirmed';
+        payButton.textContent = 'Payment confirmed';
+        setPaymentStatus('Payment confirmed. Signing this device in to the hotspot...');
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = state.mikrotikLogin.url;
@@ -112,13 +155,30 @@ document.querySelector('#modalPay').onclick = async () => {
         form.submit();
         break;
       }
-      if (state.status === 'SUCCESS' && state.session === 'ACTIVE') { status.textContent = 'Payment confirmed. Your Wi-Fi is now active.'; break; }
-      if (state.status === 'SUCCESS' && state.session === 'GATEWAY_FAILED') { status.textContent = 'Payment was received, but this hotspot could not activate your device. Contact the Wi-Fi administrator with your payment message.'; break; }
-      if (state.status === 'SUCCESS') status.textContent = 'Payment confirmed. Connecting your device to Wi-Fi...';
+      if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
+        paymentState = 'confirmed';
+        payButton.textContent = 'Payment confirmed';
+        setPaymentStatus('Payment confirmed. Your Wi-Fi is now active.');
+        break;
+      }
+      if (state.status === 'SUCCESS' && state.session === 'GATEWAY_FAILED') {
+        paymentState = 'activation_failed';
+        payButton.textContent = 'Payment received';
+        setPaymentStatus('Payment was received, but this hotspot could not activate your device. Contact support with your payment message.');
+        break;
+      }
+      if (state.status === 'SUCCESS') setPaymentStatus('Payment confirmed. Connecting your device to Wi-Fi...', true);
+    }
+    if (paymentState === 'pending') {
+      paymentState = 'timeout';
+      payButton.textContent = 'Payment submitted';
+      setPaymentStatus('This payment is still being confirmed. Do not submit another payment. If Wi-Fi does not activate, contact support with your M-Pesa message.');
     }
   } catch (error) {
-    status.textContent = error.message || 'We could not start the payment. Please try again.';
+    paymentState = 'uncertain';
+    payButton.textContent = 'Check payment status';
+    setPaymentStatus('We could not confirm whether the payment request started. Check your phone and do not submit another payment until you know its status.');
   } finally {
-    payButton.disabled = false;
+    payButton.disabled = paymentState !== 'idle';
   }
 };
