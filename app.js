@@ -99,9 +99,10 @@ async function loadPackages() {
 document.querySelector('.close').addEventListener('click', () => modal.close());
 loadPackages();
 
-document.querySelector('#paymentForm').addEventListener('submit', async event => {
+const paymentForm = document.querySelector('#paymentForm');
+const payButton = document.querySelector('#modalPay');
+const handlePaymentSubmit = async event => {
   event.preventDefault();
-  const payButton = document.querySelector('#modalPay');
   if (paymentState !== 'idle') {
     setPaymentStatus(paymentState === 'pending' || paymentState === 'starting' || paymentState === 'verifying'
       ? 'A payment request is already being processed. Check your phone and wait for its result.'
@@ -203,4 +204,12 @@ document.querySelector('#paymentForm').addEventListener('submit', async event =>
   } finally {
     payButton.disabled = paymentState !== 'idle';
   }
+};
+
+// Some captive portal webviews swallow the form's submit event on a button tap.
+// Handle the tap itself and cancel its default submit; keep submit for keyboard users.
+paymentForm.addEventListener('submit', handlePaymentSubmit);
+payButton.addEventListener('click', event => {
+  event.preventDefault();
+  handlePaymentSubmit(event);
 });
