@@ -13,6 +13,13 @@ function setPaymentStatus(message, loading = false) {
   button.setAttribute('aria-busy', String(loading));
 }
 
+function normalizeKenyanPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (/^0[17]\d{8}$/.test(digits)) return '254' + digits.slice(1);
+  if (/^254[17]\d{8}$/.test(digits)) return digits;
+  return null;
+}
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -103,6 +110,7 @@ const paymentForm = document.querySelector('#paymentForm');
 const payButton = document.querySelector('#modalPay');
 const handlePaymentSubmit = async event => {
   event.preventDefault();
+  console.log('Pay clicked');
   if (paymentState !== 'idle') {
     setPaymentStatus(paymentState === 'pending' || paymentState === 'starting' || paymentState === 'verifying'
       ? 'A payment request is already being processed. Check your phone and wait for its result.'
@@ -111,9 +119,10 @@ const handlePaymentSubmit = async event => {
   }
   paymentState = 'verifying';
   payButton.disabled = true;
-  payButton.textContent = 'Checking device…';
+  payButton.textContent = 'Checking device...';
   setPaymentStatus('Verifying the connected Wi-Fi device...', true);
-  const phone = document.querySelector('#modalPhone').value.trim().replace(/[\s-]/g, '');
+  const phone = normalizeKenyanPhone(document.querySelector('#modalPhone').value);
+  console.log('Phone normalized', phone || '(invalid)');
   const restorePayButton = message => {
     paymentState = 'idle';
     setPaymentStatus(message);
@@ -121,7 +130,7 @@ const handlePaymentSubmit = async event => {
     payButton.disabled = false;
   };
   if (!selected) { restorePayButton('Select an internet package before paying.'); return; }
-  if (!/^(?:0(?:1|7)\d{8}|254(?:1|7)\d{8})$/.test(phone)) {
+  if (!phone) {
     restorePayButton('Enter a valid Kenyan M-Pesa number, starting with 01 or 07.');
     document.querySelector('#modalPhone').focus();
     return;
@@ -130,12 +139,14 @@ const handlePaymentSubmit = async event => {
   if (portalError) { restorePayButton(portalError); return; }
   if (!portalToken) { restorePayButton('Join Barrio- HOTSPOT and open its sign-in page to buy access for this device.'); return; }
   paymentState = 'starting';
-  payButton.textContent = 'Starting payment...';
-  setPaymentStatus('Starting your M-Pesa request...', true);
+  payButton.textContent = 'Sending STK...';
+  setPaymentStatus('Sending STK...', true);
   try {
-    const response = await fetchWithTimeout('/api/payments/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, portalToken }) }, 20000);
+    console.log('Calling /api/pay');
+    const response = await fetchWithTimeout('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: selected.id, phone, amount: selected.price_kes, packageName: selected.name, portalToken }) }, 20000);
     let result = {};
     try { result = await response.json(); } catch { /* preserve the HTTP result for safe retry handling */ }
+    console.log('API response', { status: response.status, ok: response.ok, body: result });
     if (!response.ok) {
       const message = result.error || 'Could not start payment.';
       if (response.status < 500 || response.status === 503) {
@@ -149,7 +160,8 @@ const handlePaymentSubmit = async event => {
     }
     paymentState = 'pending';
     payButton.textContent = 'Payment in progress';
-    setPaymentStatus('Check your phone for the M-Pesa prompt. Approve it to activate your internet package.', true);
+    console.log('STK sent', result.checkoutRequestId);
+    setPaymentStatus('Check your phone for STK Push - Enter PIN', true);
     const deadline = Date.now() + 5 * 60_000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 3000));
