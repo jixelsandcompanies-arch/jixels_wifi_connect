@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $configPath = Join-Path $env:LOCALAPPDATA 'JixelsMikrotikAgent\agent.json'
 if (-not (Test-Path -LiteralPath $configPath)) { throw 'Agent not configured. Run setup-mikrotik-agent.ps1 first.' }
+$agentDirectory = Split-Path -Parent $configPath
+$logPath = Join-Path $agentDirectory 'agent.log'
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 $credential = Import-Clixml -LiteralPath $config.credentialPath
 if ($credential -isnot [System.Management.Automation.PSCredential]) { throw 'Saved RouterOS credential is invalid. Rerun setup-mikrotik-agent.ps1.' }
@@ -10,6 +12,20 @@ $agentHeaders = @{ Authorization = "Bearer $($config.agentToken)" }
 $routerPassword = $credential.GetNetworkCredential().Password
 $routerBasic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$($credential.UserName):$routerPassword"))
 $routerHeaders = @{ Authorization = "Basic $routerBasic" }
+
+function Write-AgentLog {
+  param([string]$Level, [string]$Message)
+  $safeMessage = $Message -replace '\b(?:Bearer|Basic)\s+\S+', '[redacted]'
+  $line = "$(Get-Date -Format o) [$Level] $safeMessage"
+  try {
+    if ((Test-Path -LiteralPath $logPath) -and (Get-Item -LiteralPath $logPath).Length -gt 1MB) {
+      $recentLines = @(Get-Content -LiteralPath $logPath -Tail 500)
+      Set-Content -LiteralPath $logPath -Value $recentLines -Encoding UTF8
+    }
+    Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
+  } catch { }
+  if ($Level -eq 'WARN' -or $Level -eq 'ERROR') { Write-Warning $line } else { Write-Host $line }
+}
 
 function Invoke-RouterRest {
   param([string]$Path, [string]$Method = 'Get', $Body = $null)
@@ -101,7 +117,7 @@ function Apply-Command($Command) {
   } else { throw "Unsupported router action: $($Command.action)" }
 }
 
-Write-Host 'Jixels MikroTik agent connected. Press Ctrl+C to stop.'
+Write-AgentLog 'INFO' 'Jixels MikroTik agent started.'
 while ($true) {
   try {
     $feed = Invoke-RestMethod -Uri $config.apiUrl -Method Get -Headers $agentHeaders -TimeoutSec 15
@@ -111,22 +127,22 @@ while ($true) {
         Apply-Command $command
         $ack = @{ commandId = $command.id; ok = $true } | ConvertTo-Json -Compress
         Invoke-RestMethod -Uri $config.apiUrl -Method Post -Headers $agentHeaders -ContentType 'application/json' -Body $ack -TimeoutSec 15 | Out-Null
-        Write-Host "Applied $($command.action) for $($command.mac_address)."
+        Write-AgentLog 'INFO' "Applied $($command.action) command $($command.id)."
       } catch {
         $failure = "$script:CurrentOperation failed: $($_.Exception.Message)"
         $ack = @{ commandId = $command.id; ok = $false; message = $failure } | ConvertTo-Json -Compress
         try { Invoke-RestMethod -Uri $config.apiUrl -Method Post -Headers $agentHeaders -ContentType 'application/json' -Body $ack -TimeoutSec 15 | Out-Null } catch { }
-        Write-Warning "Command $($command.id) failed during '$script:CurrentOperation' and will retry: $($_.Exception.Message)"
+        Write-AgentLog 'ERROR' "Command $($command.id) failed during '$script:CurrentOperation' and will retry: $($_.Exception.Message)"
       }
     }
   } catch {
     $statusCode = 0
     try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { }
     if ($statusCode -eq 401) {
-      Write-Warning 'Vercel rejected this agent before any RouterOS command ran. Check that Production has WIFI_GATEWAY_MODE=mikrotik-agent, MIKROTIK_GATEWAY_ID, and MIKROTIK_AGENT_TOKEN set, and restart the agent after correcting Vercel settings.'
-      break
+      Write-AgentLog 'ERROR' 'Vercel rejected this agent before any RouterOS command ran. Check WIFI_GATEWAY_MODE, MIKROTIK_GATEWAY_ID, and MIKROTIK_AGENT_TOKEN.'
+      exit 1
     }
-    Write-Warning "MikroTik agent poll failed: $($_.Exception.Message)"
+    Write-AgentLog 'WARN' "MikroTik agent poll failed: $($_.Exception.Message)"
   }
   Start-Sleep -Seconds 8
 }

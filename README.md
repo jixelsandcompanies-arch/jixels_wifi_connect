@@ -43,8 +43,10 @@ $AgentToken = [BitConverter]::ToString($b).Replace('-', '').ToLower()
 Set-Clipboard $AgentToken
 # Save this token in Vercel as MIKROTIK_AGENT_TOKEN.
 ./tools/setup-mikrotik-agent.ps1 -AgentToken $AgentToken -RouterUrl 'http://192.168.88.1'
-./tools/mikrotik-agent.ps1
+./tools/install-mikrotik-agent-task.ps1
 ```
+
+The scheduled task starts the agent hidden at Windows sign-in and restarts it after a process failure. Keep the PC powered on, signed in, and connected to the MikroTik LAN. The agent writes redacted operational diagnostics to `%LOCALAPPDATA%\JixelsMikrotikAgent\agent.log`.
 
 Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and allow it to read hotspot hosts/active entries and manage active entries and IP bindings. The agent verifies the checkout IP and MAC against the live HotSpot host, then creates a session-scoped bypass binding after payment confirmation. This grants internet without waiting for the customer to stay on the packages page or submit a router login form. The every-minute expiry job asks the agent to remove that exact binding at the paid wall-clock expiry. The app polls the agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
 

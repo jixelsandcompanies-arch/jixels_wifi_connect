@@ -12,12 +12,12 @@ function authorized(req) {
 export default async function handler(req, res) {
   if (!isMikrotikAgentMode() || !isGatewayConfigured() || !authorized(req)) return res.status(401).json({ error: 'Unauthorized MikroTik agent' });
   const db = supabase();
+  const { error: heartbeatError } = await db.from('mikrotik_agent_status').upsert({ id: 1, last_seen_at: new Date().toISOString() }, { onConflict: 'id' });
+  if (heartbeatError) {
+    console.error('MikroTik agent heartbeat failed', { code: heartbeatError.code, message: heartbeatError.message });
+    if (req.method === 'GET') return res.status(500).json({ error: 'Could not record MikroTik agent heartbeat' });
+  }
   if (req.method === 'GET') {
-    const { error: heartbeatError } = await db.from('mikrotik_agent_status').upsert({ id: 1, last_seen_at: new Date().toISOString() }, { onConflict: 'id' });
-    if (heartbeatError) {
-      console.error('MikroTik agent heartbeat failed', { code: heartbeatError.code, message: heartbeatError.message });
-      return res.status(500).json({ error: 'Could not record MikroTik agent heartbeat' });
-    }
     const gatewayId = mikrotikGatewayId();
     const { data, error } = await db.from('mikrotik_router_commands').select('id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,attempts').eq('status', 'PENDING').eq('gateway_id', gatewayId).order('created_at').limit(20);
     if (error) {
