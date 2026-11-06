@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Could not record MikroTik agent heartbeat' });
     }
     const gatewayId = mikrotikGatewayId();
-    const { data, error } = await db.from('mikrotik_router_commands').select('id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,hotspot_password,attempts').eq('status', 'PENDING').eq('gateway_id', gatewayId).order('created_at').limit(20);
+    const { data, error } = await db.from('mikrotik_router_commands').select('id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,attempts').eq('status', 'PENDING').eq('gateway_id', gatewayId).order('created_at').limit(20);
     if (error) {
       console.error('MikroTik agent command lookup failed', { code: error.code, message: error.message, gatewayId });
       return res.status(500).json({ error: 'Could not load MikroTik commands' });

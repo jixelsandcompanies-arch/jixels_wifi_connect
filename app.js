@@ -186,20 +186,6 @@ const handlePaymentSubmit = async event => {
         setPaymentStatus('Payment was not completed. Reopen the hotspot sign-in page before starting another attempt.');
         break;
       }
-      if (state.status === 'SUCCESS' && state.session === 'ACTIVE' && state.mikrotikLogin) {
-        paymentState = 'confirmed';
-        payButton.textContent = 'Payment confirmed';
-        setPaymentStatus('Payment confirmed. Signing this device in to the hotspot...');
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = state.mikrotikLogin.url;
-        for (const [name, value] of Object.entries({ username: state.mikrotikLogin.username, password: state.mikrotikLogin.password, dst: `${location.origin}/?connected=1` })) {
-          const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; form.append(input);
-        }
-        document.body.append(form);
-        form.submit();
-        break;
-      }
       if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
         paymentState = 'confirmed';
         payButton.textContent = 'Payment confirmed';

@@ -41,38 +41,47 @@ function Apply-Command($Command) {
 
     $script:CurrentOperation = 'check existing hotspot login for paid device'
     $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','user'))
-    $alreadyActive = $active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac -and $_.user -eq $Command.hotspot_username } | Select-Object -First 1
-    if ($alreadyActive) { return }
 
-    # A previous login for this same device can prevent the browser's new
-    # paid credentials from taking effect. Disconnect only this MAC after
-    # the payment has completed and the live HotSpot host check has passed.
+    # Clear any previous authenticated session for this MAC. The new paid
+    # access is granted by a scoped RouterOS IP binding, so browser login is
+    # not needed and the customer may leave the packages page.
     $script:CurrentOperation = 'clear prior hotspot login for paid device'
     foreach ($client in $active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac }) {
       $encodedId = [Uri]::EscapeDataString([string]$client.'.id')
       Invoke-RouterRest -Path "ip/hotspot/active/$encodedId" -Method Delete | Out-Null
     }
 
-    $script:CurrentOperation = 'find temporary paid hotspot user'
-    $users = @(Get-RouterItems -Path 'ip/hotspot/user' -Filters @{ name = $Command.hotspot_username } -Properties @('.id','name'))
-    $user = $users | Where-Object { $_.name -eq $Command.hotspot_username } | Select-Object -First 1
-
-    $newUser = @{
-      name = $Command.hotspot_username
-      password = $Command.hotspot_password
-      'mac-address' = $mac
-      'limit-uptime' = "$($Command.duration_minutes)m"
-      comment = "Jixels session $($Command.session_id)"
-    }
-    if ($user) {
-      $script:CurrentOperation = 'update temporary paid hotspot user'
-      $encodedId = [Uri]::EscapeDataString([string]$user.'.id')
-      Invoke-RouterRest -Path "ip/hotspot/user/$encodedId" -Method Patch -Body $newUser | Out-Null
+    $script:CurrentOperation = 'find existing Jixels paid-device binding'
+    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac; address = $Command.client_ip } -Properties @('.id','mac-address','address','type','comment'))
+    $bindingComment = "Jixels session $($Command.session_id)"
+    $ownedBindings = @($bindings | Where-Object { ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
+    $manualBindings = @($bindings | Where-Object { -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
+    if ($manualBindings.Count -gt 0) { throw 'A manually managed HotSpot IP binding matches this device. Ask the Wi-Fi administrator to review it.' }
+    $binding = $ownedBindings | Select-Object -First 1
+    $newBinding = @{ 'mac-address' = $mac; address = $Command.client_ip; type = 'bypassed'; comment = $bindingComment }
+    if ($binding) {
+      $script:CurrentOperation = 'update paid-device bypass binding'
+      $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
+      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Patch -Body $newBinding | Out-Null
+      foreach ($duplicate in ($ownedBindings | Select-Object -Skip 1)) {
+        $encodedId = [Uri]::EscapeDataString([string]$duplicate.'.id')
+        Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
+      }
     } else {
-      $script:CurrentOperation = 'create temporary paid hotspot user'
-      Invoke-RouterRest -Path 'ip/hotspot/user' -Method Put -Body $newUser | Out-Null
+      $script:CurrentOperation = 'create paid-device bypass binding'
+      Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
     }
   } elseif ($Command.action -eq 'BLOCK') {
+    $script:CurrentOperation = 'find paid-device bypass binding to remove'
+    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac; address = $Command.client_ip } -Properties @('.id','mac-address','address','type','comment'))
+    $bindingComment = "Jixels session $($Command.session_id)"
+    foreach ($binding in ($bindings | Where-Object { $_.comment -eq $bindingComment })) {
+      $script:CurrentOperation = 'remove expired paid-device bypass binding'
+      $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
+      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
+    }
+
+    # Also clean up entries created by the previous credential-based agent.
     $script:CurrentOperation = 'find active paid hotspot login to remove'
     $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac; user = $Command.hotspot_username } -Properties @('.id','mac-address','user'))
     foreach ($client in ($active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac -and $_.user -eq $Command.hotspot_username })) {
@@ -113,7 +122,7 @@ while ($true) {
     $statusCode = 0
     try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { }
     if ($statusCode -eq 401) {
-      Write-Warning 'Vercel rejected this agent before any RouterOS command ran. Check that Production has WIFI_GATEWAY_MODE=mikrotik-agent, MIKROTIK_AGENT_TOKEN exactly matches this PC, MIKROTIK_CREDENTIAL_SECRET is set, and MIKROTIK_HOTSPOT_LOGIN_URL is a private router login URL. Restart the agent after correcting Vercel settings.'
+      Write-Warning 'Vercel rejected this agent before any RouterOS command ran. Check that Production has WIFI_GATEWAY_MODE=mikrotik-agent, MIKROTIK_GATEWAY_ID, and MIKROTIK_AGENT_TOKEN set, and restart the agent after correcting Vercel settings.'
       break
     }
     Write-Warning "MikroTik agent poll failed: $($_.Exception.Message)"

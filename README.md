@@ -32,8 +32,6 @@ In Vercel set:
 * `WIFI_GATEWAY_MODE=mikrotik-agent`
 * `MIKROTIK_GATEWAY_ID=main` (or another short ID, matching this site)
 * `MIKROTIK_AGENT_TOKEN` to a random 32-byte token
-* `MIKROTIK_CREDENTIAL_SECRET` to a separate random secret of at least 32 bytes
-* `MIKROTIK_HOTSPOT_LOGIN_URL` to the private RouterOS HotSpot login URL, for example `http://192.168.88.1/login`
 * The CloudPay values listed above, including the signed callback at `https://jixels-wifi-connect.vercel.app/api/cloudpay/webhook`
 
 Run migration `007_mikrotik_gateway.sql` after `001` through `006`. On the always-on Windows PC connected to the MikroTik's trusted LAN, run PowerShell from this repository:
@@ -43,16 +41,12 @@ $b = New-Object byte[] 32
 [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
 $AgentToken = [BitConverter]::ToString($b).Replace('-', '').ToLower()
 Set-Clipboard $AgentToken
-# Save this token in Vercel as MIKROTIK_AGENT_TOKEN, then generate a different secret:
-$secretBytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($secretBytes)
-$MikrotikCredentialSecret = [BitConverter]::ToString($secretBytes).Replace('-', '').ToLower()
-# Save this separate value in Vercel as MIKROTIK_CREDENTIAL_SECRET.
+# Save this token in Vercel as MIKROTIK_AGENT_TOKEN.
 ./tools/setup-mikrotik-agent.ps1 -AgentToken $AgentToken -RouterUrl 'http://192.168.88.1'
 ./tools/mikrotik-agent.ps1
 ```
 
-Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and limit it to hotspot user/active operations and the agent PC. The agent validates that MikroTik still sees the checkout IP and MAC together before it creates access. Each paid RouterOS user receives a `limit-uptime` matching the purchased duration and is disconnected by RouterOS when it is used. The every-minute expiry job also expires the database session and asks the local agent to remove the active login and temporary user at the paid wall-clock expiry. The app polls this agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
+Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and allow it to read hotspot hosts/active entries and manage active entries and IP bindings. The agent verifies the checkout IP and MAC against the live HotSpot host, then creates a session-scoped bypass binding after payment confirmation. This grants internet without waiting for the customer to stay on the packages page or submit a router login form. The every-minute expiry job asks the agent to remove that exact binding at the paid wall-clock expiry. The app polls the agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
 
 ### Additional access point inventory
 
@@ -95,4 +89,4 @@ Paste that token into Vercel, redeploy, then in PowerShell from this repository 
 
 ## Expiry job
 
-`vercel.json` invokes `/api/cron/expire-sessions` every minute to update session records and queue expired-device cleanup. Set a unique `CRON_SECRET`; MikroTik users also receive a per-user `limit-uptime` equal to the purchased duration, and the local agent removes expired active logins and temporary users. OpenNDS enforces paid timeouts locally. In TYRAX agent mode, the local agent checks for expired sessions every eight seconds and blocks their MACs.
+`vercel.json` invokes `/api/cron/expire-sessions` every minute to update session records and queue expired-device cleanup. Set a unique `CRON_SECRET`; the MikroTik agent removes each session-scoped bypass binding at paid wall-clock expiry. OpenNDS enforces paid timeouts locally. In TYRAX agent mode, the local agent checks for expired sessions every eight seconds and blocks their MACs.
