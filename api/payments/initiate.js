@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 
 const cloudPayEnvironment = () => process.env.CLOUDPAY_ENV || '';
 const cloudPayBase = () => cloudPayEnvironment() === 'production'
-  ? 'https://pay.cloud.or.ke/api'
+  ? 'https://www.pay.cloud.or.ke/api'
   : cloudPayEnvironment() === 'sandbox' ? 'https://pay.cloud.or.ke/sandbox/api' : null;
 const kenyaPhone = phone => String(phone || '').replace(/\D/g, '').replace(/^0/, '254');
 

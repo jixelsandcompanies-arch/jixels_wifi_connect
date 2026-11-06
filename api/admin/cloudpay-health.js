@@ -1,7 +1,7 @@
 import { requireAdmin } from '../../lib/admin-auth.js';
 
 const baseFor = environment => environment === 'production'
-  ? 'https://pay.cloud.or.ke/api'
+  ? 'https://www.pay.cloud.or.ke/api'
   : environment === 'sandbox' ? 'https://pay.cloud.or.ke/sandbox/api' : null;
 
 export default async function handler(req, res) {
