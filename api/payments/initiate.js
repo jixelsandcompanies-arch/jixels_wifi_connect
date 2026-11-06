@@ -14,8 +14,9 @@ async function cloudPayToken() {
   const auth = Buffer.from(`${key}:${secret}`).toString('base64');
   const response = await fetch(`${cloudPayBase()}/oauth/token`, { method: 'POST', headers: { Authorization: `Basic ${auth}` } });
   const result = await response.json();
-  if (!response.ok || !result.access_token) throw new Error('CloudPay authentication failed');
-  return result.access_token;
+  const accessToken = result.access_token || result.data?.access_token;
+  if (!response.ok || !accessToken) throw new Error(response.ok ? 'CloudPay did not return an access token' : 'CloudPay authentication failed');
+  return accessToken;
 }
 
 export default async function handler(req, res) {

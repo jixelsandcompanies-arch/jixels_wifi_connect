@@ -27,10 +27,11 @@ export default async function handler(req, res) {
     });
     let result = {};
     try { result = await response.json(); } catch { /* handle invalid provider response below */ }
-    if (!response.ok || !result.access_token) {
+    const accessToken = result.access_token || result.data?.access_token;
+    if (!response.ok || !accessToken) {
       return res.status(502).json({ authenticated: false, environment, error: response.status === 401 || response.status === 403
         ? 'CloudPay rejected the consumer credentials.'
-        : `CloudPay OAuth failed (HTTP ${response.status}).` });
+        : response.ok ? 'CloudPay responded, but did not include an access token.' : `CloudPay OAuth failed (HTTP ${response.status}).` });
     }
     return res.status(200).json({ authenticated: true, environment });
   } catch (error) {
