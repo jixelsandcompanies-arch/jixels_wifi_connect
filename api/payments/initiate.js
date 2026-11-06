@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase.js';
-import { isGatewayConfigured, isMikrotikAgentMode, isMikrotikAgentOnline, isTyraxAgentMode } from '../../lib/gateway.js';
+import { isGatewayConfigured, isMikrotikAgentMode, isMikrotikAgentOnline, isTyraxAgentMode, mikrotikGatewayId } from '../../lib/gateway.js';
 import { createHash, randomBytes } from 'node:crypto';
 
 const cloudPayEnvironment = () => process.env.CLOUDPAY_ENV || '';
@@ -22,8 +22,6 @@ async function cloudPayToken() {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const { packageId, phone, portalToken } = req.body || {};
-  if (!cloudPayBase()) return res.status(503).json({ success: false, error: 'CloudPay mode is not configured. Set CLOUDPAY_ENV explicitly to production or sandbox.' });
-  if (!process.env.CLOUDPAY_CONSUMER_KEY || !process.env.CLOUDPAY_CONSUMER_SECRET || !process.env.CLOUDPAY_WEBHOOK_SECRET) return res.status(503).json({ success: false, error: 'CloudPay is not configured yet. Set CLOUDPAY_CONSUMER_KEY, CLOUDPAY_CONSUMER_SECRET, and CLOUDPAY_WEBHOOK_SECRET in Vercel.' });
   if (!isGatewayConfigured()) return res.status(503).json({ error: 'Wi-Fi access activation is not configured for this router yet. Please contact the Wi-Fi administrator.' });
   if (isTyraxAgentMode()) return res.status(503).json({ error: 'Phone-only device identification requires the openNDS captive portal. The TYRAX router agent cannot identify a device from a phone number.' });
   if (isMikrotikAgentMode() && !(await isMikrotikAgentOnline())) return res.status(503).json({ error: 'The MikroTik access agent is offline. Please try again later.' });
@@ -35,8 +33,26 @@ export default async function handler(req, res) {
   const tokenHash = createHash('sha256').update(portalToken).digest('hex');
   const contextTable = isMikrotikAgentMode() ? 'mikrotik_portal_contexts' : 'opennds_portal_contexts';
   const contextFields = isMikrotikAgentMode() ? 'id,mac_address,client_ip,gateway_id' : 'id,mac_address';
-  const { data: context } = await db.from(contextTable).select(contextFields).eq('token_hash', tokenHash).gt('expires_at', new Date().toISOString()).is('consumed_at', null).maybeSingle();
+  const { data: context, error: contextError } = await db.from(contextTable).select(contextFields).eq('token_hash', tokenHash).gt('expires_at', new Date().toISOString()).is('consumed_at', null).maybeSingle();
+  if (contextError) {
+    console.error('Portal context lookup failed', { code: contextError.code, message: contextError.message });
+    return res.status(503).json({ error: 'Hotspot session could not be verified. Please reconnect and try again.' });
+  }
   if (!context) return res.status(400).json({ error: 'Hotspot session expired. Reconnect to the Wi-Fi and try again.' });
+  if (isMikrotikAgentMode()) {
+    const gatewayId = mikrotikGatewayId();
+    if (!gatewayId || context.gateway_id !== gatewayId) {
+      console.error('MikroTik payment rejected: portal gateway identity mismatch', { configuredGatewayId: gatewayId, contextGatewayId: context.gateway_id });
+      return res.status(403).json({ error: 'This hotspot session belongs to a different or unconfigured gateway. Reopen the hotspot sign-in page.' });
+    }
+    const { data: gateway, error: gatewayError } = await db.from('mikrotik_gateways').select('gateway_id').eq('gateway_id', gatewayId).maybeSingle();
+    if (gatewayError || !gateway) {
+      console.error('MikroTik payment rejected: configured gateway is not registered', { gatewayId, code: gatewayError?.code, message: gatewayError?.message });
+      return res.status(503).json({ error: 'The MikroTik gateway is not registered. Please contact the Wi-Fi administrator.' });
+    }
+  }
+  if (!cloudPayBase()) return res.status(503).json({ success: false, error: 'CloudPay mode is not configured. Set CLOUDPAY_ENV explicitly to production or sandbox.' });
+  if (!process.env.CLOUDPAY_CONSUMER_KEY || !process.env.CLOUDPAY_CONSUMER_SECRET || !process.env.CLOUDPAY_WEBHOOK_SECRET) return res.status(503).json({ success: false, error: 'CloudPay is not configured yet. Set CLOUDPAY_CONSUMER_KEY, CLOUDPAY_CONSUMER_SECRET, and CLOUDPAY_WEBHOOK_SECRET in Vercel.' });
   const { data: plan } = await db.from('wifi_packages').select('*').eq('id', packageId).eq('is_active', true).single();
   if (!plan) return res.status(400).json({ error: 'Selected package is unavailable' });
 

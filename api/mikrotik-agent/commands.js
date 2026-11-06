@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { supabase } from '../../lib/supabase.js';
-import { isGatewayConfigured, isMikrotikAgentMode } from '../../lib/gateway.js';
+import { isGatewayConfigured, isMikrotikAgentMode, mikrotikGatewayId } from '../../lib/gateway.js';
 
 function authorized(req) {
   const expected = process.env.MIKROTIK_AGENT_TOKEN || '';
@@ -14,9 +14,17 @@ export default async function handler(req, res) {
   const db = supabase();
   if (req.method === 'GET') {
     const { error: heartbeatError } = await db.from('mikrotik_agent_status').upsert({ id: 1, last_seen_at: new Date().toISOString() }, { onConflict: 'id' });
-    if (heartbeatError) return res.status(500).json({ error: 'Could not record MikroTik agent heartbeat' });
-    const { data, error } = await db.from('mikrotik_router_commands').select('id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,hotspot_password,attempts').eq('status', 'PENDING').order('created_at').limit(20);
-    if (error) return res.status(500).json({ error: 'Could not load MikroTik commands' });
+    if (heartbeatError) {
+      console.error('MikroTik agent heartbeat failed', { code: heartbeatError.code, message: heartbeatError.message });
+      return res.status(500).json({ error: 'Could not record MikroTik agent heartbeat' });
+    }
+    const gatewayId = mikrotikGatewayId();
+    const { data, error } = await db.from('mikrotik_router_commands').select('id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,hotspot_password,attempts').eq('status', 'PENDING').eq('gateway_id', gatewayId).order('created_at').limit(20);
+    if (error) {
+      console.error('MikroTik agent command lookup failed', { code: error.code, message: error.message, gatewayId });
+      return res.status(500).json({ error: 'Could not load MikroTik commands' });
+    }
+    console.info('MikroTik agent poll completed', { gatewayId, pendingCommands: data.length });
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({ commands: data });
   }

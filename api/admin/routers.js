@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { supabase } from '../../lib/supabase.js';
 import { requireAdmin } from '../../lib/admin-auth.js';
-import { isMikrotikAgentMode } from '../../lib/gateway.js';
+import { isMikrotikAgentMode, mikrotikGatewayId } from '../../lib/gateway.js';
 
 const macPattern = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,8 +38,8 @@ function validateRouter(input) {
 
 async function syncConfiguredGateway(db) {
   if (!isMikrotikAgentMode()) return null;
-  const gatewayId = String(process.env.MIKROTIK_GATEWAY_ID || 'main');
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(gatewayId)) throw new Error('Configured MikroTik gateway ID is invalid.');
+  const gatewayId = mikrotikGatewayId();
+  if (!gatewayId) throw new Error('Configured MikroTik gateway ID is missing or invalid.');
   const { data, error } = await db.from('mikrotik_gateways').upsert({
     gateway_id: gatewayId,
     gateway_name: 'Main MikroTik HotSpot',
