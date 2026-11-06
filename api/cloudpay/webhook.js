@@ -65,6 +65,14 @@ export default async function handler(req, res) {
   let event;
   try { event = JSON.parse(body.toString('utf8')); }
   catch { return res.status(400).send('Invalid JSON'); }
+  const eventName = String(event.event || req.headers['x-cloudpay-event'] || '').toLowerCase();
+  const paymentEvents = ['payment.completed', 'payment.failed'];
+  // CloudPay's dashboard sends signed verification events without a payment
+  // reference. Acknowledge those (and other supported non-payment channels)
+  // so they are not retried as failed deliveries; never activate access here.
+  if (!paymentEvents.includes(eventName) || (event.channel && event.channel !== 'MPESA')) {
+    return res.status(200).send('Webhook received');
+  }
   if (!event.reference || !['COMPLETED', 'FAILED', 'CANCELLED'].includes(event.status)) return res.status(400).send('Invalid payment event');
 
   const db = supabase();
@@ -73,7 +81,7 @@ export default async function handler(req, res) {
   if (payment.status === 'FAILED') return res.status(200).send('Already processed');
 
   const expectedEvent = event.status === 'COMPLETED' ? 'payment.completed' : 'payment.failed';
-  if (event.event !== expectedEvent || event.channel !== 'MPESA' || event.currency !== 'KES' || Number(event.amount) !== Number(payment.amount_kes)) {
+  if (eventName !== expectedEvent || event.channel !== 'MPESA' || event.currency !== 'KES' || Number(event.amount) !== Number(payment.amount_kes)) {
     return res.status(400).send('Payment details did not match');
   }
 
