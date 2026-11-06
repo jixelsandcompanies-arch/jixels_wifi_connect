@@ -42,21 +42,22 @@ function Apply-Command($Command) {
     $script:CurrentOperation = 'check existing hotspot login for paid device'
     $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','user'))
 
-    # Clear any previous authenticated session for this MAC. The new paid
-    # access is granted by a scoped RouterOS IP binding, so browser login is
-    # not needed and the customer may leave the packages page.
-    $script:CurrentOperation = 'clear prior hotspot login for paid device'
-    foreach ($client in $active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac }) {
-      $encodedId = [Uri]::EscapeDataString([string]$client.'.id')
-      Invoke-RouterRest -Path "ip/hotspot/active/$encodedId" -Method Delete | Out-Null
-    }
-
     $script:CurrentOperation = 'find existing Jixels paid-device binding'
     $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac; address = $Command.client_ip } -Properties @('.id','mac-address','address','type','comment'))
     $bindingComment = "Jixels session $($Command.session_id)"
     $ownedBindings = @($bindings | Where-Object { ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
     $manualBindings = @($bindings | Where-Object { -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
     if ($manualBindings.Count -gt 0) { throw 'A manually managed HotSpot IP binding matches this device. Ask the Wi-Fi administrator to review it.' }
+
+    # Clear any previous authenticated session for this MAC only after
+    # confirming there is no conflicting manually managed binding. The paid
+    # bypass binding makes browser login unnecessary.
+    $script:CurrentOperation = 'clear prior hotspot login for paid device'
+    foreach ($client in $active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac }) {
+      $encodedId = [Uri]::EscapeDataString([string]$client.'.id')
+      Invoke-RouterRest -Path "ip/hotspot/active/$encodedId" -Method Delete | Out-Null
+    }
+
     $binding = $ownedBindings | Select-Object -First 1
     $newBinding = @{ 'mac-address' = $mac; address = $Command.client_ip; type = 'bypassed'; comment = $bindingComment }
     if ($binding) {
