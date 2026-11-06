@@ -34,7 +34,11 @@ async function requestJson(url, options = {}) {
     token = null;
     showLogin();
   }
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(data.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -58,17 +62,16 @@ function showLogin() {
       const data = await requestJson('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: $('#loginEmail').value.trim(), password: $('#loginPassword').value }) });
       token = data.accessToken;
       storeAdminToken(token);
-      $('.login').remove();
-      await loadDashboard();
+      const loaded = await loadDashboard();
+      if (!loaded) throw new Error('Could not load the admin dashboard. Check your connection and try again.');
     } catch (exception) {
       error.textContent = exception.message || 'Sign in failed. Check your email and password.';
     } finally { submit.disabled = false; }
   };
 }
 
-// Show the sign-in form before later UI bindings run, so a stale cached page
-// cannot leave the admin shell hidden if one of its optional controls is absent.
-if (!token) showLogin();
+// Bind the visible fallback login form before other UI startup work.
+showLogin();
 
 function renderMetrics(metrics) {
   const items = [
@@ -128,6 +131,7 @@ async function loadDashboard() {
   try {
     const data = await requestJson('/api/admin/dashboard', { headers: authHeaders(), cache: 'no-store' });
     document.body.classList.add('admin-authenticated');
+    $('.login')?.remove();
     catalogue = Array.isArray(data.packages) ? data.packages : [];
     breakdown = Array.isArray(data.breakdown) ? data.breakdown : [];
     renderMetrics(data.metrics || {});
@@ -136,13 +140,19 @@ async function loadDashboard() {
     renderRevenue(data.revenue || {});
     $('#updatedAt').textContent = `Updated ${kenyaTime(new Date().toISOString())}`;
   } catch (exception) {
-    if (!token) return;
-    document.body.classList.add('admin-authenticated');
-    $('#metrics').innerHTML = `<div class="metric" role="alert"><small>Dashboard unavailable</small><b class="error">${escapeHtml(exception.message)}</b></div>`;
-    $('#packages').innerHTML = `<tr><td colspan="6" class="table-message">${escapeHtml(exception.message)}</td></tr>`;
-    $('#sessions').innerHTML = '<tr><td colspan="5" class="table-message">Dashboard data could not be loaded.</td></tr>';
-    $('#revenue').innerHTML = '<p class="table-message">Revenue data could not be loaded.</p>';
+    if (!token) {
+      showLogin();
+      const loginError = $('#loginError');
+      if (loginError) loginError.textContent = exception.message || 'Admin dashboard could not be loaded.';
+      return false;
+    }
+    document.body.classList.remove('admin-authenticated');
+    showLogin();
+    const loginError = $('#loginError');
+    if (loginError) loginError.textContent = exception.message || 'Admin dashboard could not be loaded.';
+    return false;
   }
+  return true;
 }
 
 async function checkCloudPay() {
