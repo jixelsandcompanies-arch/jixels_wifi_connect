@@ -52,7 +52,7 @@ $MikrotikCredentialSecret = [BitConverter]::ToString($secretBytes).Replace('-', 
 ./tools/mikrotik-agent.ps1
 ```
 
-Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and limit it to hotspot user/active operations and the agent PC. The agent validates that MikroTik still sees the checkout IP and MAC together before it creates access. RouterOS `limit-uptime` removes the paid session at expiry; the agent also removes active sessions and temporary users when the expiry job runs. The app polls this agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
+Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and limit it to hotspot user/active operations and the agent PC. The agent validates that MikroTik still sees the checkout IP and MAC together before it creates access. Each paid RouterOS user receives a `limit-uptime` matching the purchased duration and is disconnected by RouterOS when it is used. The every-minute expiry job also expires the database session and asks the local agent to remove the active login and temporary user at the paid wall-clock expiry. The app polls this agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
 
 ### Additional access point inventory
 
@@ -95,4 +95,4 @@ Paste that token into Vercel, redeploy, then in PowerShell from this repository 
 
 ## Expiry job
 
-`vercel.json` invokes `/api/cron/expire-sessions` every five minutes. Set a unique `CRON_SECRET`; openNDS enforces paid session timeouts locally. In TYRAX agent mode, the local agent also checks for expired sessions every eight seconds and blocks their MACs.
+`vercel.json` invokes `/api/cron/expire-sessions` every minute to update session records and queue expired-device cleanup. Set a unique `CRON_SECRET`; MikroTik users also receive a per-user `limit-uptime` equal to the purchased duration, and the local agent removes expired active logins and temporary users. OpenNDS enforces paid timeouts locally. In TYRAX agent mode, the local agent checks for expired sessions every eight seconds and blocks their MACs.
