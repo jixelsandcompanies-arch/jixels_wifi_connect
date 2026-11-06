@@ -242,7 +242,8 @@ function openRouterEditor(device = null) {
 
 const connectionTypeInput = $('#connectionType');
 if (connectionTypeInput) connectionTypeInput.onchange = () => { $('#operatingMode').value = modeForConnection[connectionTypeInput.value]; };
-$('#routerForm').onsubmit = async event => {
+const routerForm = $('#routerForm');
+if (routerForm) routerForm.onsubmit = async event => {
   event.preventDefault();
   const id = $('#routerId').value;
   const payload = {
