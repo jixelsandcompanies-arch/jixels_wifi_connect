@@ -19,19 +19,43 @@ function Invoke-RouterRest {
 }
 
 function Normalize-Mac([string]$Mac) { $Mac.Trim().ToLowerInvariant() }
+function Get-RouterItems {
+  param([string]$Path, [hashtable]$Filters, [string[]]$Properties)
+  $query = @(
+    foreach ($key in $Filters.Keys) {
+      "$key=$([Uri]::EscapeDataString([string]$Filters[$key]))"
+    }
+    ".proplist=$($Properties -join ',')"
+  )
+  Invoke-RouterRest -Path "$Path?$($query -join '&')"
+}
+
 function Apply-Command($Command) {
   $mac = Normalize-Mac $Command.mac_address
-  $users = @(Invoke-RouterRest -Path 'ip/hotspot/user')
-  $user = $users | Where-Object { $_.name -eq $Command.hotspot_username } | Select-Object -First 1
 
   if ($Command.action -eq 'ALLOW') {
-    $hosts = @(Invoke-RouterRest -Path 'ip/hotspot/host')
+    $script:CurrentOperation = 'verify paid device on hotspot'
+    $hosts = @(Get-RouterItems -Path 'ip/hotspot/host' -Filters @{ 'mac-address' = $mac; address = $Command.client_ip } -Properties @('.id','mac-address','address'))
     $host = $hosts | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac -and $_.address -eq $Command.client_ip } | Select-Object -First 1
     if (-not $host) { throw 'The MikroTik no longer sees this client IP and MAC together. The command was not applied.' }
 
-    $active = @(Invoke-RouterRest -Path 'ip/hotspot/active')
+    $script:CurrentOperation = 'check existing hotspot login for paid device'
+    $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','user'))
     $alreadyActive = $active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac -and $_.user -eq $Command.hotspot_username } | Select-Object -First 1
     if ($alreadyActive) { return }
+
+    # A previous login for this same device can prevent the browser's new
+    # paid credentials from taking effect. Disconnect only this MAC after
+    # the payment has completed and the live HotSpot host check has passed.
+    $script:CurrentOperation = 'clear prior hotspot login for paid device'
+    foreach ($client in $active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac }) {
+      $encodedId = [Uri]::EscapeDataString([string]$client.'.id')
+      Invoke-RouterRest -Path "ip/hotspot/active/$encodedId" -Method Delete | Out-Null
+    }
+
+    $script:CurrentOperation = 'find temporary paid hotspot user'
+    $users = @(Get-RouterItems -Path 'ip/hotspot/user' -Filters @{ name = $Command.hotspot_username } -Properties @('.id','name'))
+    $user = $users | Where-Object { $_.name -eq $Command.hotspot_username } | Select-Object -First 1
 
     $newUser = @{
       name = $Command.hotspot_username
@@ -41,18 +65,26 @@ function Apply-Command($Command) {
       comment = "Jixels session $($Command.session_id)"
     }
     if ($user) {
+      $script:CurrentOperation = 'update temporary paid hotspot user'
       $encodedId = [Uri]::EscapeDataString([string]$user.'.id')
       Invoke-RouterRest -Path "ip/hotspot/user/$encodedId" -Method Patch -Body $newUser | Out-Null
     } else {
+      $script:CurrentOperation = 'create temporary paid hotspot user'
       Invoke-RouterRest -Path 'ip/hotspot/user' -Method Put -Body $newUser | Out-Null
     }
   } elseif ($Command.action -eq 'BLOCK') {
-    $active = @(Invoke-RouterRest -Path 'ip/hotspot/active')
+    $script:CurrentOperation = 'find active paid hotspot login to remove'
+    $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac; user = $Command.hotspot_username } -Properties @('.id','mac-address','user'))
     foreach ($client in ($active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac -and $_.user -eq $Command.hotspot_username })) {
+      $script:CurrentOperation = 'remove expired hotspot login'
       $encodedId = [Uri]::EscapeDataString([string]$client.'.id')
       Invoke-RouterRest -Path "ip/hotspot/active/$encodedId" -Method Delete | Out-Null
     }
+    $script:CurrentOperation = 'find expired temporary hotspot user'
+    $users = @(Get-RouterItems -Path 'ip/hotspot/user' -Filters @{ name = $Command.hotspot_username } -Properties @('.id','name'))
+    $user = $users | Where-Object { $_.name -eq $Command.hotspot_username } | Select-Object -First 1
     if ($user) {
+      $script:CurrentOperation = 'remove expired temporary hotspot user'
       $encodedId = [Uri]::EscapeDataString([string]$user.'.id')
       Invoke-RouterRest -Path "ip/hotspot/user/$encodedId" -Method Delete | Out-Null
     }
@@ -65,14 +97,16 @@ while ($true) {
     $feed = Invoke-RestMethod -Uri $config.apiUrl -Method Get -Headers $agentHeaders -TimeoutSec 15
     foreach ($command in $feed.commands) {
       try {
+        $script:CurrentOperation = 'apply router command'
         Apply-Command $command
         $ack = @{ commandId = $command.id; ok = $true } | ConvertTo-Json -Compress
         Invoke-RestMethod -Uri $config.apiUrl -Method Post -Headers $agentHeaders -ContentType 'application/json' -Body $ack -TimeoutSec 15 | Out-Null
         Write-Host "Applied $($command.action) for $($command.mac_address)."
       } catch {
-        $ack = @{ commandId = $command.id; ok = $false; message = $_.Exception.Message } | ConvertTo-Json -Compress
+        $failure = "$script:CurrentOperation failed: $($_.Exception.Message)"
+        $ack = @{ commandId = $command.id; ok = $false; message = $failure } | ConvertTo-Json -Compress
         try { Invoke-RestMethod -Uri $config.apiUrl -Method Post -Headers $agentHeaders -ContentType 'application/json' -Body $ack -TimeoutSec 15 | Out-Null } catch { }
-        Write-Warning "Command $($command.id) failed and will retry: $($_.Exception.Message)"
+        Write-Warning "Command $($command.id) failed during '$script:CurrentOperation' and will retry: $($_.Exception.Message)"
       }
     }
   } catch {

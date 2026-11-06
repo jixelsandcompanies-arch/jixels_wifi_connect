@@ -31,10 +31,12 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const { commandId, ok, message = '' } = req.body || {};
     if (!/^[0-9a-f-]{36}$/i.test(commandId || '') || typeof ok !== 'boolean') return res.status(400).json({ error: 'Invalid command acknowledgement' });
-    const { data: command, error } = await db.from('mikrotik_router_commands').select('id,attempts').eq('id', commandId).eq('status', 'PENDING').maybeSingle();
+    const { data: command, error } = await db.from('mikrotik_router_commands').select('id,attempts,gateway_id').eq('id', commandId).eq('status', 'PENDING').maybeSingle();
     if (error || !command) return res.status(404).json({ error: 'Pending MikroTik command not found' });
     if (!ok) {
-      await db.from('mikrotik_router_commands').update({ attempts: command.attempts + 1, last_error: String(message).slice(0, 500) }).eq('id', command.id).eq('status', 'PENDING');
+      const safeMessage = String(message).replace(/\b(?:Bearer|Basic)\s+\S+/gi, '[redacted]').slice(0, 500);
+      const { error: updateError } = await db.from('mikrotik_router_commands').update({ attempts: command.attempts + 1, last_error: safeMessage }).eq('id', command.id).eq('status', 'PENDING');
+      console.warn('MikroTik router command failed', { commandId: command.id, gatewayId: command.gateway_id, attempt: command.attempts + 1, message: safeMessage, updateError: updateError?.message });
       return res.status(202).json({ received: true, retry: true });
     }
     const { data: completed, error: completionError } = await db.rpc('complete_mikrotik_router_command', { p_command_id: command.id });

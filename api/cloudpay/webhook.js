@@ -45,7 +45,8 @@ async function activate(db, payment, payload) {
       grant = await queueOpenNdsAuth({ sessionId: session.id, hid: context.hid, durationMinutes: payment.wifi_packages.duration_minutes });
     }
     await db.from('wifi_sessions').update({ gateway_reference: grant.gatewayReference }).eq('id', session.id);
-  } catch {
+  } catch (error) {
+    console.error('Gateway authorization queue failed', { paymentId: payment.id, sessionId: session.id, code: error.code, message: error.message });
     await db.from('wifi_sessions').update({ session_status: 'GATEWAY_FAILED' }).eq('id', session.id).eq('session_status', 'WAITING_GATEWAY');
   }
 }
@@ -93,6 +94,9 @@ export default async function handler(req, res) {
   }
 
   try { await activate(db, payment, event); }
-  catch { return res.status(503).send('Could not record payment result; retry webhook'); }
+  catch (error) {
+    console.error('CloudPay payment activation failed', { paymentId: payment.id, code: error.code, message: error.message });
+    return res.status(503).send('Could not record payment result; retry webhook');
+  }
   return res.status(200).send('Accepted');
 }
