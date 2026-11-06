@@ -12,7 +12,7 @@ function storeAdminToken(value) {
 function clearAdminToken() {
   try { sessionStorage.removeItem('jixelsAdminToken'); } catch { /* storage may be blocked in captive browsers */ }
 }
-let catalogue = [], breakdown = [], routerDevices = [], parentGateways = [], token = readAdminToken(), toastTimer, deferredInstallPrompt = null;
+let catalogue = [], breakdown = [], paymentReviews = [], routerDevices = [], parentGateways = [], token = readAdminToken(), toastTimer, deferredInstallPrompt = null;
 let currentAdminPage = 'overview';
 const authHeaders = () => token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -114,18 +114,118 @@ function statusClass(status) {
 }
 
 function renderSessions(sessions) {
-  $('#sessions').innerHTML = sessions.length ? sessions.map(session => `<tr>
+  $('#sessions').innerHTML = sessions.length ? sessions.map(session => {
+    const canDelete = ['EXPIRED', 'REVOKED'].includes(session.session_status) && Date.parse(session.expiry_time) <= Date.now();
+    return `<tr>
     <td>${escapeHtml(session.phone)}</td><td>${escapeHtml(session.wifi_packages?.name || 'Package unavailable')}</td>
     <td>${escapeHtml(kenyaTime(session.start_time))}</td><td>${escapeHtml(kenyaTime(session.expiry_time))}</td>
     <td><span class="status-pill ${statusClass(session.session_status)}">${escapeHtml(String(session.session_status || 'Unknown').replaceAll('_', ' '))}</span></td>
-  </tr>`).join('') : '<tr><td colspan="5" class="table-message">No customer sessions recorded yet.</td></tr>';
+    <td>${canDelete ? `<button class="action-button" type="button" data-session-delete="${escapeHtml(session.id)}">Delete</button>` : '<span class="table-note">—</span>'}</td>
+  </tr>`;
+  }).join('') : '<tr><td colspan="6" class="table-message">No customer sessions recorded yet.</td></tr>';
 }
+
+$('#sessions')?.addEventListener('click', async event => {
+  const button = event.target.closest('[data-session-delete]');
+  if (!button || button.disabled) return;
+  if (!window.confirm('Delete this ended session record? Its payment record will remain.')) return;
+  button.disabled = true;
+  try {
+    await requestJson('/api/admin/sessions', {
+      method: 'DELETE', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: button.dataset.sessionDelete })
+    });
+    notify('Session deleted. Payment history was kept.');
+    await loadDashboard();
+  } catch (error) {
+    notify(error.message || 'Session could not be deleted.', true);
+    button.disabled = false;
+  }
+});
 
 function renderRevenue(revenue) {
   const labels = [['Today', revenue.today], ['Last 7 days', revenue.week], ['This month', revenue.month], ['All time', revenue.total]];
   $('#revenue').innerHTML = labels.map(([label, row]) => `<div class="revenue-row"><span>${label}<small>${Number(row.sales || 0).toLocaleString('en-KE')} confirmed sales</small></span><b>${fmt(row.amount)}</b></div>`).join('');
   $('#breakdown').innerHTML = breakdown.length ? breakdown.map(row => `<div class="breakdown-row"><span>${escapeHtml(row.name)}<small>${Number(row.sold || 0).toLocaleString('en-KE')} sold</small></span><b>${fmt(row.revenue)}</b></div>`).join('') : '<p class="table-message">No package sales to show yet.</p>';
 }
+
+function singleRelation(value) { return Array.isArray(value) ? value[0] || null : value; }
+
+function renderPaymentReviews() {
+  const target = $('#paymentReviews');
+  if (!target) return;
+  target.innerHTML = paymentReviews.length ? paymentReviews.map(payment => {
+    const pkg = singleRelation(payment.wifi_packages);
+    return `<tr>
+      <td>${escapeHtml(payment.phone)}</td>
+      <td>${escapeHtml(pkg?.name || 'Package unavailable')}</td>
+      <td>${fmt(payment.amount_kes)}</td>
+      <td><span class="status-pill ${payment.status === 'FAILED' ? 'inactive' : 'waiting-gateway'}">${escapeHtml(payment.status)}</span></td>
+      <td>${escapeHtml(kenyaTime(payment.created_at))}</td>
+      <td><button class="action-button" type="button" data-payment-review="${escapeHtml(payment.id)}">Review</button></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" class="table-message">No pending or failed payments need review.</td></tr>';
+}
+
+async function loadPaymentReviews() {
+  const target = $('#paymentReviews');
+  if (!target || !token) return;
+  try {
+    const data = await requestJson('/api/admin/payments', { headers: authHeaders(), cache: 'no-store' });
+    paymentReviews = Array.isArray(data.payments) ? data.payments : [];
+    renderPaymentReviews();
+  } catch (error) {
+    target.innerHTML = `<tr><td colspan="6" class="table-message">${escapeHtml(error.message || 'Payments needing review could not be loaded.')}</td></tr>`;
+  }
+}
+
+function openPaymentReview(payment) {
+  const pkg = singleRelation(payment.wifi_packages);
+  $('#reviewPaymentId').value = payment.id;
+  $('#reviewPaymentSummary').innerHTML = `<dl><div><dt>Phone</dt><dd>${escapeHtml(payment.phone)}</dd></div><div><dt>Amount</dt><dd>${fmt(payment.amount_kes)}</dd></div><div><dt>Package</dt><dd>${escapeHtml(pkg?.name || 'Package unavailable')}</dd></div><div><dt>Current status</dt><dd>${escapeHtml(payment.status)}</dd></div></dl>`;
+  $('#reviewReceipt').value = '';
+  $('#reviewNote').value = '';
+  $('#reviewConfirmPaid').checked = false;
+  $('#paymentReviewError').textContent = '';
+  $('#paymentReviewDialog').showModal();
+  $('#reviewReceipt').focus();
+}
+
+const paymentReviewsTable = $('#paymentReviews');
+if (paymentReviewsTable) paymentReviewsTable.addEventListener('click', event => {
+  const button = event.target.closest('button[data-payment-review]');
+  const payment = paymentReviews.find(row => row.id === button?.dataset.paymentReview);
+  if (payment) openPaymentReview(payment);
+});
+
+const paymentReviewForm = $('#paymentReviewForm');
+if (paymentReviewForm) paymentReviewForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const payment = paymentReviews.find(row => row.id === $('#reviewPaymentId').value);
+  if (!payment) return;
+  const button = $('#confirmPaymentReview'), error = $('#paymentReviewError');
+  button.disabled = true;
+  error.textContent = 'Recording verified payment and queuing Wi-Fi access...';
+  try {
+    const result = await requestJson('/api/admin/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        paymentId: payment.id,
+        receipt: $('#reviewReceipt').value.trim(),
+        verificationNote: $('#reviewNote').value.trim(),
+        verifiedPhone: payment.phone,
+        verifiedAmount: payment.amount_kes,
+        confirmedPaid: $('#reviewConfirmPaid').checked
+      })
+    });
+    $('#paymentReviewDialog').close();
+    notify(result.message || 'Payment verified. Check the session status for Wi-Fi activation.');
+    await loadDashboard();
+  } catch (exception) {
+    error.textContent = exception.message || 'Payment could not be reconciled.';
+  } finally { button.disabled = false; }
+});
 
 async function loadDashboard() {
   try {
@@ -138,6 +238,7 @@ async function loadDashboard() {
     renderPackages();
     renderSessions(Array.isArray(data.sessions) ? data.sessions : []);
     renderRevenue(data.revenue || {});
+    await loadPaymentReviews();
     $('#updatedAt').textContent = `Updated ${kenyaTime(new Date().toISOString())}`;
   } catch (exception) {
     if (!token) {
@@ -187,7 +288,7 @@ function renderRouterInventory(data) {
   parentGateways = Array.isArray(data.parentGateways) ? data.parentGateways : [];
   const rows = $('#routers');
   $('#gatewayNotice').textContent = data.configuredGateway
-    ? `Central gateway: ${data.configuredGateway.gateway_name} (${data.configuredGateway.gateway_id}). Agent heartbeat: ${data.agentHeartbeat === 'RECENT' ? 'recent' : data.agentHeartbeat === 'STALE' ? 'stale' : 'not seen'}. A recent heartbeat confirms the agent contacted Jixels; it does not verify router or access point connectivity.`
+    ? `Central gateway: ${data.configuredGateway.gateway_name} (${data.configuredGateway.gateway_id}). Agent: ${data.agentHeartbeat === 'RECENT' ? 'online' : data.agentHeartbeat === 'STALE' ? 'stale' : 'not seen'}; RouterOS link: ${data.routerConnectivity === 'RECENT' ? 'online' : data.routerConnectivity === 'STALE' ? 'stale' : 'offline'}. Access point connectivity is not probed.`
     : 'No central MikroTik gateway is configured in this deployment. Access points cannot be registered until the gateway is configured.';
   $('#addRouter').disabled = parentGateways.length === 0;
   if (!routerDevices.length) {
@@ -384,7 +485,7 @@ const adminPages = {
   overview: ['Overview', 'BUSINESS MANAGEMENT', 'Monitor your hotspot and billing activity.'],
   packages: ['Packages', 'CUSTOMER PLANS', 'Create packages, update prices, and control availability.'],
   sessions: ['Sessions', 'CUSTOMER ACCESS', 'Review recent Wi-Fi sessions and their status.'],
-  revenue: ['Payments & revenue', 'BILLING REPORTS', 'Track confirmed payments and package sales.'],
+  revenue: ['Payments & revenue', 'BILLING REPORTS', 'Review unconfirmed payments and track confirmed sales.'],
   routers: ['Router Management', 'NETWORK DEVICES', 'Register and review access points connected to the central MikroTik gateway.']
 };
 
@@ -409,6 +510,7 @@ function showAdminPage(page, updateHistory = false) {
   if (updateHistory) history.pushState({ adminPage: page }, '', `#${page}Page`);
   setMenu(false);
   if (page === 'routers' && token) loadRouterInventory();
+  if (page === 'revenue' && token) loadPaymentReviews();
 }
 
 document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', event => {
@@ -432,6 +534,12 @@ const refreshButton = $('#refresh');
 if (refreshButton) refreshButton.onclick = () => currentAdminPage === 'routers' ? loadRouterInventory() : loadDashboard();
 const checkCloudPayButton = $('#checkCloudPay');
 if (checkCloudPayButton) checkCloudPayButton.addEventListener('click', checkCloudPay);
+const refreshPaymentsButton = $('#refreshPayments');
+if (refreshPaymentsButton) refreshPaymentsButton.addEventListener('click', loadPaymentReviews);
+const closePaymentReviewButton = $('#closePaymentReview');
+if (closePaymentReviewButton) closePaymentReviewButton.onclick = () => $('#paymentReviewDialog').close();
+const cancelPaymentReviewButton = $('#cancelPaymentReview');
+if (cancelPaymentReviewButton) cancelPaymentReviewButton.onclick = () => $('#paymentReviewDialog').close();
 const addButton = $('#add');
 if (addButton) addButton.onclick = () => openEditor();
 const addRouterButton = $('#addRouter');

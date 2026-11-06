@@ -11,11 +11,11 @@ async function rawBody(req) {
   return Buffer.concat(chunks);
 }
 
-async function activate(db, payment, payload) {
+export async function activate(db, payment, payload) {
   const start = payment.confirmed_at ? new Date(payment.confirmed_at) : new Date();
   const expiry = expiryFrom(payment.wifi_packages, start);
-  if (payment.status === 'PENDING') {
-    const { error } = await db.from('payments').update({ status: 'SUCCESS', mpesa_receipt_number: payload.receipt || null, raw_callback: payload, confirmed_at: start.toISOString() }).eq('id', payment.id).eq('status', 'PENDING');
+  if (['PENDING', 'FAILED'].includes(payment.status)) {
+    const { error } = await db.from('payments').update({ status: 'SUCCESS', mpesa_receipt_number: payload.receipt || null, raw_callback: payload, confirmed_at: start.toISOString() }).eq('id', payment.id).in('status', ['PENDING', 'FAILED']);
     if (error) throw error;
   }
 
@@ -74,13 +74,14 @@ export default async function handler(req, res) {
   if (!paymentEvents.includes(eventName) || (event.channel && event.channel !== 'MPESA')) {
     return res.status(200).send('Webhook received');
   }
-  if (!event.reference || !['COMPLETED', 'FAILED', 'CANCELLED'].includes(event.status)) return res.status(400).send('Invalid payment event');
+  if (!event.reference || !['COMPLETED', 'FAILED', 'CANCELLED'].includes(event.status)) {
+    console.info('CloudPay webhook acknowledged event without transaction fields', { eventName, hasReference: Boolean(event.reference), status: event.status || null });
+    return res.status(200).send('Webhook received; no transaction processed');
+  }
 
   const db = supabase();
   const { data: payment } = await db.from('payments').select('*, wifi_packages(*)').eq('checkout_request_id', event.reference).maybeSingle();
   if (!payment) return res.status(503).send('Payment record not ready; retry webhook');
-  if (payment.status === 'FAILED') return res.status(200).send('Already processed');
-
   const expectedEvent = event.status === 'COMPLETED' ? 'payment.completed' : 'payment.failed';
   if (eventName !== expectedEvent || event.channel !== 'MPESA' || event.currency !== 'KES' || Number(event.amount) !== Number(payment.amount_kes)) {
     return res.status(400).send('Payment details did not match');

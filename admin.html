@@ -87,11 +87,17 @@
       <section class="admin-view" id="sessionsPage" data-page-view="sessions" hidden>
         <section id="sessionsSection" class="section-block card-section" aria-labelledby="sessionsTitle">
           <div class="section-heading"><div><h2 id="sessionsTitle">Customer sessions</h2><p>Latest Wi-Fi access activity.</p></div><span class="live-pill"><span class="online-dot"></span>Live data</span></div>
-          <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Package</th><th>Started</th><th>Expires</th><th>Status</th></tr></thead><tbody id="sessions"><tr><td colspan="5" class="table-message">Loading sessions...</td></tr></tbody></table></div>
-          <p class="table-note">Showing the latest 50 sessions.</p>
+          <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Package</th><th>Started</th><th>Expires</th><th>Status</th><th>Action</th></tr></thead><tbody id="sessions"><tr><td colspan="6" class="table-message">Loading sessions...</td></tr></tbody></table></div>
+          <p class="table-note">Showing the latest 50 sessions. Only ended sessions can be deleted; payment records are kept.</p>
         </section>
       </section>
       <section class="admin-view" id="revenuePage" data-page-view="revenue" hidden>
+        <section class="section-block card-section" aria-labelledby="paymentReviewTitle">
+          <div class="section-heading"><div><h2 id="paymentReviewTitle">Payments needing review</h2><p>Only confirm a payment after matching its M-Pesa receipt, amount, and phone in your transaction statement.</p></div><button id="refreshPayments" class="button button-quiet" type="button">Refresh payments</button></div>
+          <p class="payment-review-notice">Confirming payment records the sale. Wi-Fi still depends on the MikroTik agent completing the access command.</p>
+          <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Package</th><th>Amount</th><th>Payment status</th><th>Time</th><th>Review</th></tr></thead><tbody id="paymentReviews"><tr><td colspan="6" class="table-message">Loading payments...</td></tr></tbody></table></div>
+          <p class="table-note">Showing the latest 50 pending or failed payments.</p>
+        </section>
         <section id="revenueSection" class="section-block card-section" aria-labelledby="revenueTitle">
           <div class="section-heading"><div><h2 id="revenueTitle">Payments &amp; revenue</h2><p>Confirmed M-Pesa payments only.</p></div></div>
           <div id="revenue" class="revenue-list"><p class="table-message">Loading revenue...</p></div>
@@ -120,7 +126,22 @@
       <div class="modal-actions"><button id="cancelBottom" class="button button-quiet" type="button">Cancel</button><button id="savePackage" class="button button-primary" type="submit">Save package</button></div>
     </form>
   </dialog>
+  <dialog id="paymentReviewDialog" class="editor-dialog">
+    <form id="paymentReviewForm">
+      <div class="modal-title"><div><small>PAYMENT RECONCILIATION</small><h2>Confirm verified payment</h2></div><button type="button" id="closePaymentReview" class="icon-button" aria-label="Close">X</button></div>
+      <input id="reviewPaymentId" type="hidden">
+      <div id="reviewPaymentSummary" class="payment-review-summary"></div>
+      <p class="payment-review-notice">Check your CloudPay or M-Pesa transaction statement first. Do not confirm based on a customer screenshot alone. This action records the sale and queues the Wi-Fi grant.</p>
+      <div class="form-grid">
+        <label class="field field-wide">M-Pesa receipt<input id="reviewReceipt" maxlength="16" autocomplete="off" required><small>Enter the receipt code exactly as shown in the transaction statement.</small></label>
+        <label class="field field-wide">Verification note<textarea id="reviewNote" rows="3" maxlength="300" placeholder="Where you checked the receipt and any relevant reference" required></textarea></label>
+        <label class="payment-confirm-check field-wide"><input id="reviewConfirmPaid" type="checkbox" required><span>I verified that this receipt is successful and that its amount and phone match the payment above.</span></label>
+      </div>
+      <p id="paymentReviewError" class="form-error" role="alert"></p>
+      <div class="modal-actions"><button id="cancelPaymentReview" class="button button-quiet" type="button">Cancel</button><button id="confirmPaymentReview" class="button button-primary" type="submit">Record verified payment</button></div>
+    </form>
+  </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="admin.js?v=adminfix5"></script>
+  <script src="admin.js?v=admin-session-delete1"></script>
 </body>
 </html>
