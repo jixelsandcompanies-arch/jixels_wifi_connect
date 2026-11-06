@@ -40,8 +40,7 @@ async function requestJson(url, options = {}) {
 
 function showLogin() {
   document.body.classList.remove('admin-authenticated');
-  if ($('.login')) return;
-  document.body.insertAdjacentHTML('afterbegin', '<div class="login"><form id="loginForm"><b>Barrio- HOTSPOT</b><h1>Admin sign in</h1><p>Use your administrator account to manage this hotspot.</p><label>Email<input id="loginEmail" type="email" autocomplete="username" required></label><label>Password<div class="password-input"><input id="loginPassword" type="password" autocomplete="current-password" required><button id="togglePassword" type="button" aria-label="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m4 4 16 16"/></svg></button></div></label><button id="loginSubmit" type="submit">Sign in</button><small id="loginError" role="alert"></small></form></div>');
+  if (!$('.login')) document.body.insertAdjacentHTML('afterbegin', '<div class="login"><form id="loginForm"><b>Barrio- HOTSPOT</b><h1>Admin sign in</h1><p>Use your administrator account to manage this hotspot.</p><label>Email<input id="loginEmail" type="email" autocomplete="username" required></label><label>Password<div class="password-input"><input id="loginPassword" type="password" autocomplete="current-password" required><button id="togglePassword" type="button" aria-label="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m4 4 16 16"/></svg></button></div></label><button id="loginSubmit" type="submit">Sign in</button><small id="loginError" role="alert"></small></form></div>');
   $('#togglePassword').onclick = () => {
     const input = $('#loginPassword'), button = $('#togglePassword');
     const reveal = input.type === 'password';
@@ -149,15 +148,21 @@ async function loadDashboard() {
 async function checkCloudPay() {
   const button = $('#checkCloudPay');
   const status = $('#cloudPayHealthStatus');
+  if (button.disabled) return;
   button.disabled = true;
   button.textContent = 'Checking...';
   status.textContent = 'Checking CloudPay OAuth...';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
-    const result = await requestJson('/api/admin/cloudpay-health', { headers: authHeaders(), cache: 'no-store' });
+    const result = await requestJson('/api/admin/cloudpay-health', { headers: authHeaders(), cache: 'no-store', signal: controller.signal });
     status.textContent = `Connected to CloudPay ${result.environment}. Credentials accepted.`;
   } catch (error) {
-    status.textContent = error.message || 'CloudPay authentication check failed.';
+    status.textContent = error.name === 'AbortError'
+      ? 'CloudPay check timed out. Check your connection and try again.'
+      : error.message || 'CloudPay authentication check failed.';
   } finally {
+    clearTimeout(timer);
     button.disabled = false;
     button.textContent = 'Check CloudPay';
   }
@@ -353,10 +358,15 @@ if (packagesTable) packagesTable.addEventListener('click', async event => {
 });
 
 function setMenu(open) {
-  $('#sidebar').classList.toggle('open', open);
-  $('#sidebarBackdrop').classList.toggle('visible', open);
-  $('#menuToggle').setAttribute('aria-expanded', String(open));
-  $('#menuToggle').setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+  const sidebar = $('#sidebar');
+  const backdrop = $('#sidebarBackdrop');
+  const toggle = $('#menuToggle');
+  if (!sidebar || !backdrop || !toggle) return;
+  sidebar.classList.toggle('open', open);
+  backdrop.classList.toggle('visible', open);
+  backdrop.setAttribute('aria-hidden', String(!open));
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
 }
 
 const adminPages = {
@@ -401,13 +411,16 @@ window.addEventListener('popstate', () => {
   showAdminPage(page);
 });
 const menuToggle = $('#menuToggle');
-if (menuToggle) menuToggle.onclick = () => setMenu(!$('#sidebar').classList.contains('open'));
+if (menuToggle) menuToggle.addEventListener('click', event => {
+  event.preventDefault();
+  setMenu(!$('#sidebar')?.classList.contains('open'));
+});
 const sidebarBackdrop = $('#sidebarBackdrop');
-if (sidebarBackdrop) sidebarBackdrop.onclick = () => setMenu(false);
+if (sidebarBackdrop) sidebarBackdrop.addEventListener('click', () => setMenu(false));
 const refreshButton = $('#refresh');
 if (refreshButton) refreshButton.onclick = () => currentAdminPage === 'routers' ? loadRouterInventory() : loadDashboard();
 const checkCloudPayButton = $('#checkCloudPay');
-if (checkCloudPayButton) checkCloudPayButton.onclick = checkCloudPay;
+if (checkCloudPayButton) checkCloudPayButton.addEventListener('click', checkCloudPay);
 const addButton = $('#add');
 if (addButton) addButton.onclick = () => openEditor();
 const addRouterButton = $('#addRouter');

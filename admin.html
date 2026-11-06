@@ -15,6 +15,17 @@
   <link rel="stylesheet" href="admin-login.css">
 </head>
 <body>
+  <div class="login" id="adminLogin">
+    <form id="loginForm">
+      <b>Barrio- HOTSPOT</b>
+      <h1>Admin sign in</h1>
+      <p>Use your administrator account to manage this hotspot.</p>
+      <label>Email<input id="loginEmail" type="email" autocomplete="username" required></label>
+      <label>Password<div class="password-input"><input id="loginPassword" type="password" autocomplete="current-password" required><button id="togglePassword" type="button" aria-label="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m4 4 16 16"/></svg></button></div></label>
+      <button id="loginSubmit" type="submit">Sign in</button>
+      <small id="loginError" role="alert"></small>
+    </form>
+  </div>
   <div class="admin-shell">
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="#overviewPage" aria-label="Barrio- HOTSPOT Admin home">
@@ -44,11 +55,15 @@
         <button id="refresh" class="button button-quiet" type="button"> Refresh</button>
       </header>
 
+      <section class="section-heading cloudpay-health" aria-labelledby="cloudPayHealthTitle">
+        <div><h2 id="cloudPayHealthTitle">CloudPay connection</h2><p id="cloudPayHealthStatus" role="status" aria-live="polite">Not checked</p></div>
+        <button id="checkCloudPay" class="button button-quiet" type="button">Check CloudPay</button>
+      </section>
+
       <section class="admin-view active" id="overviewPage" data-page-view="overview" aria-labelledby="summaryTitle">
       <section class="section-block">
         <div class="section-heading"><div><h2 id="summaryTitle">Business summary</h2><p>Live totals from your billing records.</p></div><span id="updatedAt" class="muted"></span></div>
         <div id="metrics" class="metrics" aria-live="polite"><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div></div>
-        <div class="section-heading cloudpay-health"><div><h3>CloudPay connection</h3><p id="cloudPayHealthStatus" role="status" aria-live="polite">Not checked</p></div><button id="checkCloudPay" class="button button-quiet" type="button">Check CloudPay</button></div>
       </section>
       </section>
 
@@ -106,6 +121,6 @@
     </form>
   </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="admin.js?v=adminfix2"></script>
+  <script src="admin.js?v=adminfix4"></script>
 </body>
 </html>

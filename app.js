@@ -88,7 +88,17 @@ function renderPackages(packages) {
     card.innerHTML = `${badge ? `<span>${badge}</span>` : ''}<i aria-hidden="true">Wi-Fi</i><h3></h3><b>${fmt(item.price_kes)}</b><p>${duration(item.duration_minutes)}</p><button type="button">Buy Now</button>`;
     card.querySelector('h3').textContent = item.name;
     card.onclick = () => openPackage(item);
-    card.onkeydown = event => { if (event.key === 'Enter') openPackage(item); };
+    const buyButton = card.querySelector('button');
+    buyButton.onclick = event => {
+      event.stopPropagation();
+      openPackage(item);
+    };
+    card.onkeydown = event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openPackage(item);
+      }
+    };
     grid.append(card);
   });
 }

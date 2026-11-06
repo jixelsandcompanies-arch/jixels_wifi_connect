@@ -18,3 +18,5 @@ h1, h2, h3, h4, h5, h6 { font-family: Arial, Helvetica, sans-serif !important; f
 .install-icon{display:block;width:22px;height:22px;padding:3px;border-radius:6px;background:var(--red);fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 .cloudpay-health{margin-top:18px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fff}.cloudpay-health h3{margin:0 0 4px;font-size:13px}.cloudpay-health p{margin:0;color:var(--muted);font-size:11px}.cloudpay-health .button{min-width:132px}
+.cloudpay-health{position:relative;z-index:1;display:flex;flex-wrap:wrap;min-height:72px;margin:0 0 22px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;align-items:center;gap:12px}.cloudpay-health>div{flex:1 1 200px}.cloudpay-health h2{margin:0 0 4px;font-size:13px}.cloudpay-health p{margin:0;color:var(--muted);font-size:11px}.cloudpay-health .button{flex:0 0 auto;min-width:132px;min-height:44px;pointer-events:auto;touch-action:manipulation}
+.sidebar-backdrop.visible{cursor:pointer;touch-action:manipulation}.menu-toggle{position:relative;z-index:21;touch-action:manipulation}
