@@ -12,20 +12,7 @@ function authorized(req) {
 export default async function handler(req, res) {
   if (!isMikrotikAgentMode() || !isGatewayConfigured() || !authorized(req)) return res.status(401).json({ error: 'Unauthorized MikroTik agent' });
   const db = supabase();
-  const body = req.body || {};
-  if (req.method === 'POST' && body.type === 'heartbeat') {
-    if (typeof body.routerOnline !== 'boolean') return res.status(400).json({ error: 'Invalid agent health report' });
-    const timestamp = new Date().toISOString();
-    const { error } = await db.from('mikrotik_agent_status').upsert({
-      id: 1, last_seen_at: timestamp, router_last_seen_at: body.routerOnline ? timestamp : null
-    }, { onConflict: 'id' });
-    if (error) {
-      console.error('MikroTik agent health report failed', { code: error.code, message: error.message });
-      return res.status(500).json({ error: 'Could not record MikroTik agent health' });
-    }
-    return res.status(200).json({ received: true });
-  }
-  const { error: heartbeatError } = await db.from('mikrotik_agent_status').update({ last_seen_at: new Date().toISOString() }).eq('id', 1);
+  const { error: heartbeatError } = await db.from('mikrotik_agent_status').upsert({ id: 1, last_seen_at: new Date().toISOString() }, { onConflict: 'id' });
   if (heartbeatError) {
     console.error('MikroTik agent heartbeat failed', { code: heartbeatError.code, message: heartbeatError.message });
     if (req.method === 'GET') return res.status(500).json({ error: 'Could not record MikroTik agent heartbeat' });

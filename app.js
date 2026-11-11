@@ -2,7 +2,7 @@ const grid = document.querySelector('#planGrid');
 const modal = document.querySelector('#purchaseModal');
 const fmt = value => `KSh ${Number(value).toLocaleString('en-KE')}`;
 const duration = minutes => minutes === 90 ? '1 hour 30 minutes' : minutes >= 1440 ? `${minutes / 1440} days` : minutes >= 60 ? `${minutes / 60} hours` : `${minutes} minutes`;
-let selected, portalToken = null, portalRequest = null, activeStatusToken = null, checkingPaymentStatus = false;
+let selected, portalToken = null, portalError = null, portalReady = Promise.resolve();
 let paymentState = 'idle';
 
 function setPaymentStatus(message, loading = false) {
@@ -35,24 +35,24 @@ const fas = params.get('fas');
 const mikrotikPortal = params.get('gateway') === 'mikrotik';
 if (fas) {
   history.replaceState({}, '', location.pathname);
-  portalRequest = { url: '/api/opennds/context', body: { fas } };
+  portalReady = fetchWithTimeout('/api/opennds/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fas }) })
+    .then(async response => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Hotspot session could not be verified.');
+      portalToken = result.portalToken;
+    })
+    .catch(error => { portalError = error.name === 'AbortError' ? 'The hotspot check timed out. Reopen the captive portal and try again.' : error.message; });
 } else if (mikrotikPortal) {
   const clientMac = params.get('clientmac');
   const clientIp = params.get('clientip');
   history.replaceState({}, '', location.pathname);
-  portalRequest = { url: '/api/mikrotik/context', body: { clientMac, clientIp } };
-}
-
-async function createPortalContext() {
-  if (!portalRequest) throw new Error('Join Barrio- HOTSPOT and open its sign-in page to buy access for this device.');
-  const response = await fetchWithTimeout(portalRequest.url, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(portalRequest.body)
-  }, 15000);
-  let result = {};
-  try { result = await response.json(); } catch { /* display a safe context error below */ }
-  if (!response.ok || !result.portalToken) throw new Error(result.error || 'The hotspot could not verify this device. Reopen its sign-in page and try again.');
-  portalToken = result.portalToken;
-  return portalToken;
+  portalReady = fetchWithTimeout('/api/mikrotik/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientMac, clientIp }) })
+    .then(async response => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'The MikroTik hotspot could not verify this device.');
+      portalToken = result.portalToken;
+    })
+    .catch(error => { portalError = error.name === 'AbortError' ? 'The hotspot check timed out. Reopen the captive portal and try again.' : error.message; });
 }
 
 function openPackage(item) {
@@ -66,10 +66,6 @@ function openPackage(item) {
     payButton.disabled = false;
     payButton.textContent = `Pay ${fmt(item.price_kes)}`;
     setPaymentStatus('Enter your M-Pesa PIN only in the official prompt on your phone. Never share it here.');
-  } else if (paymentState === 'timeout' && activeStatusToken) {
-    payButton.disabled = false;
-    payButton.textContent = 'Check payment status';
-    setPaymentStatus('This payment has not been confirmed yet. Check its status before starting another payment.');
   } else {
     payButton.disabled = true;
     payButton.textContent = paymentState === 'pending' || paymentState === 'starting' ? 'Payment in progress' : paymentState === 'confirmed' ? 'Payment confirmed' : 'Payment already submitted';
@@ -118,72 +114,17 @@ async function loadPackages() {
 }
 
 document.querySelector('.close').addEventListener('click', () => modal.close());
-document.querySelector('#modalChoosePackage').addEventListener('click', () => modal.close());
 loadPackages();
 
 const paymentForm = document.querySelector('#paymentForm');
 const payButton = document.querySelector('#modalPay');
-async function checkPaymentStatus(maxWaitMs = 0) {
-  if (!activeStatusToken || checkingPaymentStatus) return;
-  checkingPaymentStatus = true;
-  paymentState = 'pending';
-  payButton.disabled = true;
-  payButton.textContent = 'Checking payment...';
-  setPaymentStatus('Checking the payment result. Do not pay again while it is pending.', true);
-  const deadline = Date.now() + Math.max(0, maxWaitMs);
-  try {
-    do {
-      try {
-        const response = await fetchWithTimeout(`/api/payments/status?token=${encodeURIComponent(activeStatusToken)}`, { cache: 'no-store' }, 10000);
-        if (response.ok) {
-          const state = await response.json();
-          if (state.status === 'FAILED') {
-            activeStatusToken = null;
-            paymentState = 'idle';
-            payButton.textContent = selected ? `Pay ${fmt(selected.price_kes)}` : 'Choose a package';
-            setPaymentStatus('This payment was not completed. You can retry this package or choose another one below. You can stay on this page.');
-            return;
-          }
-          if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
-            activeStatusToken = null;
-            paymentState = 'confirmed';
-            payButton.textContent = 'Payment confirmed';
-            setPaymentStatus('Payment confirmed. Your Wi-Fi is now active.');
-            return;
-          }
-          if (state.status === 'SUCCESS' && state.session === 'GATEWAY_FAILED') {
-            activeStatusToken = null;
-            paymentState = 'activation_failed';
-            payButton.textContent = 'Payment received';
-            setPaymentStatus('Payment was received, but this hotspot could not activate your device. Do not pay again. Contact support with your M-Pesa message.');
-            return;
-          }
-          if (state.status === 'SUCCESS') setPaymentStatus('Payment confirmed. Connecting your device to Wi-Fi...', true);
-        }
-      } catch { /* try again during the short automatic check window */ }
-      if (Date.now() >= deadline) break;
-      await new Promise(resolve => setTimeout(resolve, Math.min(5000, deadline - Date.now())));
-    } while (Date.now() <= deadline);
-    paymentState = 'timeout';
-    payButton.textContent = 'Check payment status';
-    setPaymentStatus('Still waiting for confirmation. Tap Check payment status to check again. Do not start another payment while this one is pending.');
-  } finally {
-    checkingPaymentStatus = false;
-    payButton.disabled = !['idle', 'timeout'].includes(paymentState);
-  }
-}
-
 const handlePaymentSubmit = async event => {
   event.preventDefault();
   console.log('Pay clicked');
-  if (paymentState === 'timeout' && activeStatusToken) {
-    await checkPaymentStatus(0);
-    return;
-  }
   if (paymentState !== 'idle') {
     setPaymentStatus(paymentState === 'pending' || paymentState === 'starting' || paymentState === 'verifying'
       ? 'A payment request is already being processed. Check your phone and wait for its result.'
-      : 'This payment has already been submitted. Do not pay again; check its status or contact support.');
+      : 'This checkout attempt has already been used. Reopen the hotspot sign-in page to try again.');
     return;
   }
   paymentState = 'verifying';
@@ -204,8 +145,9 @@ const handlePaymentSubmit = async event => {
     document.querySelector('#modalPhone').focus();
     return;
   }
-  try { await createPortalContext(); }
-  catch (error) { restorePayButton(error.message || 'The hotspot could not verify this device.'); return; }
+  await portalReady;
+  if (portalError) { restorePayButton(portalError); return; }
+  if (!portalToken) { restorePayButton('Join Barrio- HOTSPOT and open its sign-in page to buy access for this device.'); return; }
   paymentState = 'starting';
   payButton.textContent = 'Sending STK...';
   setPaymentStatus('Sending STK...', true);
@@ -217,12 +159,6 @@ const handlePaymentSubmit = async event => {
     console.log('API response', { status: response.status, ok: response.ok, body: result });
     if (!response.ok) {
       const message = result.error || 'Could not start payment.';
-      if (result.status === 'FAILED' && result.statusToken) {
-        activeStatusToken = result.statusToken;
-        paymentState = 'pending';
-        await checkPaymentStatus(0);
-        return;
-      }
       if (response.status < 500 || response.status === 503) {
         restorePayButton(message);
         return;
@@ -233,23 +169,48 @@ const handlePaymentSubmit = async event => {
       return;
     }
     paymentState = 'pending';
-    activeStatusToken = result.statusToken || null;
-    if (!activeStatusToken) {
-      paymentState = 'uncertain';
-      payButton.textContent = 'Payment status unavailable';
-      setPaymentStatus('The payment request was accepted but its status link is missing. Check your phone; do not pay again.');
-      return;
-    }
     payButton.textContent = 'Payment in progress';
     console.log('STK sent', result.checkoutRequestId);
-    setPaymentStatus(result.error || 'Check your phone for STK Push - Enter PIN', true);
-    await checkPaymentStatus(90000);
+    setPaymentStatus('Check your phone for STK Push - Enter PIN', true);
+    const deadline = Date.now() + 5 * 60_000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      let check;
+      try { check = await fetchWithTimeout(`/api/payments/status?token=${encodeURIComponent(result.statusToken)}`, { cache: 'no-store' }, 10000); }
+      catch { continue; }
+      if (!check.ok) continue;
+      const state = await check.json();
+      if (state.status === 'FAILED') {
+        paymentState = 'failed';
+        payButton.textContent = 'Payment not completed';
+        setPaymentStatus('Payment was not completed. Reopen the hotspot sign-in page before starting another attempt.');
+        break;
+      }
+      if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
+        paymentState = 'confirmed';
+        payButton.textContent = 'Payment confirmed';
+        setPaymentStatus('Payment confirmed. Your Wi-Fi is now active.');
+        break;
+      }
+      if (state.status === 'SUCCESS' && state.session === 'GATEWAY_FAILED') {
+        paymentState = 'activation_failed';
+        payButton.textContent = 'Payment received';
+        setPaymentStatus('Payment was received, but this hotspot could not activate your device. Contact support with your payment message.');
+        break;
+      }
+      if (state.status === 'SUCCESS') setPaymentStatus('Payment confirmed. Connecting your device to Wi-Fi...', true);
+    }
+    if (paymentState === 'pending') {
+      paymentState = 'timeout';
+      payButton.textContent = 'Payment submitted';
+      setPaymentStatus('This payment is still being confirmed. Do not submit another payment. If Wi-Fi does not activate, contact support with your M-Pesa message.');
+    }
   } catch (error) {
     paymentState = 'uncertain';
     payButton.textContent = 'Check payment status';
     setPaymentStatus('We could not confirm whether the payment request started. Check your phone and do not submit another payment until you know its status.');
   } finally {
-    payButton.disabled = !['idle', 'timeout'].includes(paymentState);
+    payButton.disabled = paymentState !== 'idle';
   }
 };
 

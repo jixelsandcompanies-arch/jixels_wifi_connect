@@ -68,14 +68,12 @@ export default async function handler(req, res) {
     console.error('CloudPay pending payment insert failed', insertError);
     return res.status(500).json({ success: false, error: 'Could not save a pending payment record. Please try again.' });
   }
-  let cloudPayRequestStarted = false;
   try {
     const accessToken = await cloudPayToken();
     // M-Pesa's account reference is limited to 12 characters and the
     // transaction description to 13. Longer values can be rejected before
     // Safaricom sends the customer's STK prompt.
     const transactionReference = `JX${randomBytes(5).toString('hex').toUpperCase()}`;
-    cloudPayRequestStarted = true;
     const response = await fetch(`${cloudPayBase()}/payments/mpesa/stkpush`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -85,21 +83,18 @@ export default async function handler(req, res) {
     const reference = result.data?.reference || result.reference;
     if (!response.ok || result.status !== 'success' || !reference) {
       await db.from('payments').update({ status: 'FAILED', raw_callback: result }).eq('id', payment.id).eq('status', 'PENDING');
-      return res.status(502).json({ success: false, status: 'FAILED', statusToken, error: result.message || 'CloudPay could not start the M-Pesa prompt.' });
+      return res.status(502).json({ success: false, error: result.message || 'CloudPay could not start the M-Pesa prompt.' });
     }
     const { error: updateError } = await db.from('payments').update({ checkout_request_id: reference }).eq('id', payment.id).eq('status', 'PENDING');
     if (updateError) {
       console.error('CloudPay reference update failed', updateError);
-      return res.status(202).json({ success: true, status: 'PENDING', statusToken, error: 'CloudPay accepted the request, but the status is still being checked. Check your phone and do not retry yet.' });
+      return res.status(500).json({ success: false, error: 'CloudPay accepted the payment request, but its reference could not be saved. Check your phone before retrying.' });
     }
     await db.from(contextTable).update({ consumed_at: new Date().toISOString(), payment_id: payment.id }).eq('id', context.id);
     return res.status(202).json({ success: true, checkoutRequestId: reference, statusToken, status: 'PENDING', message: 'STK sent. Check your phone and enter your M-Pesa PIN.' });
   } catch (error) {
+    await db.from('payments').update({ status: 'FAILED', raw_callback: { error: error.message || 'CloudPay request failed' } }).eq('id', payment.id).eq('status', 'PENDING');
     console.error('CloudPay STK request failed', error);
-    if (!cloudPayRequestStarted) {
-      await db.from('payments').update({ status: 'FAILED', raw_callback: { error: error.message || 'CloudPay authentication failed' } }).eq('id', payment.id).eq('status', 'PENDING');
-      return res.status(502).json({ success: false, status: 'FAILED', statusToken, error: 'CloudPay could not start this payment. You can retry or choose another package.' });
-    }
-    return res.status(202).json({ success: true, status: 'PENDING', statusToken, error: 'We could not confirm the M-Pesa request result yet. Check your phone and do not retry until this attempt is confirmed failed.' });
+    return res.status(502).json({ success: false, error: error.message || 'Could not connect to CloudPay.' });
   }
 }

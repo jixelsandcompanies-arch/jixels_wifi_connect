@@ -34,21 +34,6 @@ function Invoke-RouterRest {
   Invoke-RestMethod @params
 }
 
-function Test-RouterReachable {
-  try {
-    Invoke-RouterRest -Path 'system/resource?.proplist=uptime' | Out-Null
-    return $true
-  } catch {
-    Write-AgentLog 'WARN' "RouterOS health check failed: $($_.Exception.Message)"
-    return $false
-  }
-}
-
-function Send-AgentHeartbeat([bool]$RouterOnline) {
-  $body = @{ type = 'heartbeat'; routerOnline = $RouterOnline } | ConvertTo-Json -Compress
-  Invoke-RestMethod -Uri $config.apiUrl -Method Post -Headers $agentHeaders -ContentType 'application/json' -Body $body -TimeoutSec 15 | Out-Null
-}
-
 function Normalize-Mac([string]$Mac) { $Mac.Trim().ToLowerInvariant() }
 function Get-RouterItems {
   param([string]$Path, [hashtable]$Filters, [string[]]$Properties)
@@ -135,20 +120,7 @@ function Apply-Command($Command) {
 Write-AgentLog 'INFO' 'Jixels MikroTik agent started.'
 while ($true) {
   try {
-    $routerOnline = Test-RouterReachable
-    $healthReported = $false
-    try { Send-AgentHeartbeat -RouterOnline $routerOnline; $healthReported = $true }
-    catch { Write-AgentLog 'WARN' "Could not report agent/router health: $($_.Exception.Message)" }
     $feed = Invoke-RestMethod -Uri $config.apiUrl -Method Get -Headers $agentHeaders -TimeoutSec 15
-    if (-not $routerOnline) {
-      if ($healthReported) {
-        Write-AgentLog 'WARN' 'RouterOS is unreachable; pending commands remain queued and the payment health gate has been notified.'
-      } else {
-        Write-AgentLog 'WARN' 'RouterOS is unreachable; pending commands remain queued. The payment health gate could not be notified.'
-      }
-      Start-Sleep -Seconds 8
-      continue
-    }
     foreach ($command in $feed.commands) {
       try {
         $script:CurrentOperation = 'apply router command'

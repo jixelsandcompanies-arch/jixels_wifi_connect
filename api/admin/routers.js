@@ -60,18 +60,16 @@ export default async function handler(req, res) {
       const [gatewaysResult, routersResult, agentResult] = await Promise.all([
         db.from('mikrotik_gateways').select('gateway_id,gateway_name').order('gateway_name'),
         db.from('wifi_router_registry').select('id,router_name,router_mac,router_ip,connection_type,operating_mode,parent_gateway_id,is_enabled,verification_status,created_at,updated_at,mikrotik_gateways(gateway_name)').order('router_name'),
-        db.from('mikrotik_agent_status').select('last_seen_at,router_last_seen_at').eq('id', 1).maybeSingle()
+        db.from('mikrotik_agent_status').select('last_seen_at').eq('id', 1).maybeSingle()
       ]);
       const failed = [gatewaysResult, routersResult].find(result => result.error);
       if (failed) return res.status(500).json({ error: 'Router inventory could not be loaded. Confirm migration 008 has been applied.' });
       const heartbeatAge = agentResult.data?.last_seen_at ? Date.now() - Date.parse(agentResult.data.last_seen_at) : null;
-      const routerAge = agentResult.data?.router_last_seen_at ? Date.now() - Date.parse(agentResult.data.router_last_seen_at) : null;
       return res.status(200).json({
         configuredGateway: configured,
         parentGateways: gatewaysResult.data || [],
         routers: routersResult.data || [],
-        agentHeartbeat: heartbeatAge === null ? 'UNKNOWN' : heartbeatAge <= 90_000 ? 'RECENT' : 'STALE',
-        routerConnectivity: routerAge === null ? 'OFFLINE' : routerAge <= 90_000 ? 'RECENT' : 'STALE'
+        agentHeartbeat: heartbeatAge === null ? 'UNKNOWN' : heartbeatAge <= 90_000 ? 'RECENT' : 'STALE'
       });
     } catch {
       return res.status(503).json({ error: 'MikroTik gateway inventory is not configured.' });

@@ -20,12 +20,3 @@ h1, h2, h3, h4, h5, h6 { font-family: Arial, Helvetica, sans-serif !important; f
 .cloudpay-health{margin-top:18px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fff}.cloudpay-health h3{margin:0 0 4px;font-size:13px}.cloudpay-health p{margin:0;color:var(--muted);font-size:11px}.cloudpay-health .button{min-width:132px}
 .cloudpay-health{position:relative;z-index:1;display:flex;flex-wrap:wrap;min-height:72px;margin:0 0 22px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;align-items:center;gap:12px}.cloudpay-health>div{flex:1 1 200px}.cloudpay-health h2{margin:0 0 4px;font-size:13px}.cloudpay-health p{margin:0;color:var(--muted);font-size:11px}.cloudpay-health .button{flex:0 0 auto;min-width:132px;min-height:44px;pointer-events:auto;touch-action:manipulation}
 .sidebar-backdrop.visible{cursor:pointer;touch-action:manipulation}.menu-toggle{position:relative;z-index:21;touch-action:manipulation}
-
-.payment-review-notice{margin:0 0 14px;padding:11px 13px;border:1px solid #f0dca8;border-radius:8px;background:#fff9e9;color:#735915;font-size:12px}
-.payment-review-summary{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px;background:#f8fafc}
-.payment-review-summary dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
-.payment-review-summary dt{color:var(--muted);font-size:11px}
-.payment-review-summary dd{margin:2px 0 0;font-weight:700;overflow-wrap:anywhere}
-.payment-confirm-check{display:flex;align-items:flex-start;gap:9px;padding:12px;border:1px solid var(--line);border-radius:8px;background:#f8fafc}
-.payment-confirm-check input{margin-top:4px}
-@media(max-width:480px){.payment-review-summary dl{grid-template-columns:1fr}}
