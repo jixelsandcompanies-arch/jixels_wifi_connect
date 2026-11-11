@@ -13,7 +13,7 @@ test('Pay submit posts normalized phone after portal check and displays STK feed
     ['#planGrid', grid], ['#purchaseModal', { showModal() {}, close() {} }], ['#modalName', makeElement()],
     ['#modalPrice', makeElement()], ['#modalDescription', makeElement()], ['#modalPhone', makeElement()],
     ['#modalPay', Object.assign(makeElement(), { id: 'modalPay' })], ['#modalStatus', makeElement()],
-    ['#modalStatusText', makeElement()], ['#paymentForm', Object.assign(makeElement(), { id: 'paymentForm' })], ['#modalChoosePackage', makeElement()], ['.close', makeElement()]
+    ['#modalStatusText', makeElement()], ['#paymentForm', Object.assign(makeElement(), { id: 'paymentForm' })], ['.close', makeElement()]
   ]);
   const requests = [];
   const document = {
@@ -50,6 +50,6 @@ test('Pay submit posts normalized phone after portal check and displays STK feed
   assert.ok(requests.some(request => request.url === '/api/packages'));
   assert.equal(pay.options.method, 'POST');
   assert.deepEqual(JSON.parse(pay.options.body), { packageId: 'pkg-1', phone: '254115613332', amount: 10, packageName: '1 Hour', portalToken: 'a'.repeat(64) });
-  assert.match(elements.get('#modalStatusText').textContent, /payment was not completed/i);
+  assert.match(elements.get('#modalStatusText').textContent, /Payment was not completed/);
   assert.ok(requests.some(request => request.url.startsWith('/api/payments/status')));
 });

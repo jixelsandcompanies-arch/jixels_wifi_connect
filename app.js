@@ -108,30 +108,12 @@ function renderPackages(packages) {
 }
 
 async function loadPackages() {
-  grid.innerHTML = '<p role="status" aria-live="polite">Loading packages…</p>';
   try {
-    let response;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetchWithTimeout('/api/packages', { headers: { Accept: 'application/json' } }, 10000);
-      if (response.status !== 429 || attempt === 1) break;
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    if (!response.ok) throw new Error(response.status === 429 ? 'The package service is busy. Please try again.' : 'Packages could not be loaded.');
-    let packages;
-    try { packages = await response.json(); }
-    catch { throw new Error('The package service returned an invalid response. Please try again shortly.'); }
-    renderPackages(packages);
-  } catch (error) {
-    const message = error.name === 'AbortError' ? 'Loading packages timed out. Check your connection and try again.' : error.message || 'Packages could not be loaded. Check your connection and try again.';
-    grid.replaceChildren();
-    const notice = document.createElement('p');
-    notice.setAttribute('role', 'status');
-    notice.textContent = message;
-    const retry = document.createElement('button');
-    retry.type = 'button';
-    retry.textContent = 'Try again';
-    retry.addEventListener('click', loadPackages);
-    grid.append(notice, retry);
+    const response = await fetch('/api/packages');
+    if (!response.ok) throw new Error('Packages could not be loaded.');
+    renderPackages(await response.json());
+  } catch {
+    grid.innerHTML = '<p>Packages could not be loaded. Check your connection and try again.</p>';
   }
 }
 
