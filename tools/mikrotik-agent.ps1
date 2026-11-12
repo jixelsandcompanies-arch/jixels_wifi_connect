@@ -175,5 +175,5 @@ while ($true) {
     }
     Write-AgentLog 'WARN' "MikroTik agent poll failed: $($_.Exception.Message)"
   }
-  Start-Sleep -Seconds 8
+  Start-Sleep -Seconds 3
 }

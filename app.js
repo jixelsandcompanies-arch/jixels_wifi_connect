@@ -99,28 +99,41 @@ async function restorePaidAccess() {
   if (!portalToken) { setPaymentStatus('Reconnect to Barrio- HOTSPOT and open this page from its sign-in screen on the device that paid.'); return; }
   payButton.disabled = true;
   payButton.textContent = 'Checking Wi-Fi access...';
-  setPaymentStatus('Verifying the receipt and asking the hotspot to apply your access...', true);
-  let lastError = null;
+  setPaymentStatus('Verifying your receipt and asking the hotspot to activate Wi-Fi...', true);
   try {
-    for (let attempt = 0; attempt < 30; attempt++) {
-      const response = await fetchWithTimeout('/api/payments/recover-login', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ portalToken, phone, receipt })
-      }, 10000);
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (response.status < 500) throw new Error(result.error || 'Could not verify this payment.');
-        lastError = result.error || 'The hotspot is temporarily unavailable.';
-      } else {
-        lastError = null;
-        if (result.sessionStatus === 'ACTIVE') {
+    const response = await fetchWithTimeout('/api/payments/recover-login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ portalToken, phone, receipt })
+    }, 10000);
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not verify this payment.');
+    if (result.sessionStatus === 'ACTIVE') {
+      payButton.textContent = 'Wi-Fi active';
+      announceConnected('Already-paid access has been applied to this device. Reconnect to Barrio- HOTSPOT to start browsing. If you still have no internet, contact Wi-Fi support and give them your M-Pesa receipt.');
+      return;
+    }
+
+    const statusToken = String(result.statusToken || '');
+    if (!/^[a-f0-9]{64}$/.test(statusToken)) throw new Error('Payment verified, but the hotspot status check could not start. Try again shortly.');
+    const deadline = Date.now() + 25000;
+    let lastError = '';
+    let attempt = 0;
+    while (Date.now() < deadline) {
+      if (attempt > 0) {
+        setPaymentStatus('Receipt verified. Applying Wi-Fi now; keep this device connected and do not pay again.', true);
+        await new Promise(resolve => setTimeout(resolve, Math.min(2000, 500 + attempt * 125)));
+      }
+      attempt++;
+      try {
+        const check = await fetchWithTimeout(`/api/payments/status?token=${encodeURIComponent(statusToken)}`, { cache: 'no-store' }, 7000);
+        const state = await check.json().catch(() => ({}));
+        if (!check.ok) lastError = state.error || 'The hotspot status check is temporarily unavailable.';
+        else if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
           payButton.textContent = 'Wi-Fi active';
           announceConnected('Already-paid access has been applied to this device. Reconnect to Barrio- HOTSPOT to start browsing. If you still have no internet, contact Wi-Fi support and give them your M-Pesa receipt.');
           return;
         }
-      }
-      if (attempt < 29) {
-        setPaymentStatus('Receipt verified. Hotspot is applying access now. Keep this device connected to Barrio- HOTSPOT; do not pay again.', true);
-        await new Promise(resolve => setTimeout(resolve, 4000));
+      } catch (statusError) {
+        lastError = statusError.message || 'The hotspot status check is temporarily unavailable.';
       }
     }
     payButton.disabled = false;

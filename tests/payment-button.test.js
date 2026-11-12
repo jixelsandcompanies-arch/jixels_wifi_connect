@@ -53,3 +53,44 @@ test('Pay submit posts normalized phone after portal check and displays STK feed
   assert.match(elements.get('#modalStatusText').textContent, /Payment was not completed/);
   assert.ok(requests.some(request => request.url.startsWith('/api/payments/status')));
 });
+
+test('Already paid verifies the receipt once and polls status until access is active', async () => {
+  const source = await readFile(new URL('../app.js', import.meta.url), 'utf8');
+  const listeners = new Map();
+  const makeElement = id => ({ id, textContent: '', value: '', hidden: false, disabled: false, attributes: {}, classList: { toggle() {} }, setAttribute(name, value) { this.attributes[name] = value; }, addEventListener(name, callback) { listeners.set(this.id || name, callback); }, closest() { return makeElement('phoneLabel'); }, focus() {}, scrollIntoView() {} });
+  const grid = { replaceChildren() {}, append() {}, scrollIntoView() {}, innerHTML: '' };
+  const modal = { showModal() {}, close() { this.closed = true; } };
+  const elements = new Map([
+    ['#planGrid', grid], ['#purchaseModal', modal], ['#modalName', makeElement('modalName')],
+    ['#modalPrice', makeElement('modalPrice')], ['#modalDescription', makeElement('modalDescription')],
+    ['#modalPhone', makeElement('modalPhone')], ['#modalReceipt', makeElement('modalReceipt')],
+    ['#modalReceiptLabel', makeElement('modalReceiptLabel')], ['#modalPay', makeElement('modalPay')],
+    ['#modalStatus', makeElement('modalStatus')], ['#modalStatusText', makeElement('modalStatusText')],
+    ['#paymentForm', makeElement('paymentForm')], ['#restoreAccess', makeElement('restoreAccess')],
+    ['#connectionNotice', makeElement('connectionNotice')], ['.close', makeElement('close')],
+    ['.choice', makeElement('choice')]
+  ]);
+  const requests = [];
+  const fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (url === '/api/packages') return { ok: true, json: async () => [] };
+    if (url === '/api/mikrotik/context') return { ok: true, json: async () => ({ portalToken: 'a'.repeat(64) }) };
+    if (url === '/api/payments/recover-login') return { ok: true, json: async () => ({ success: true, sessionStatus: 'WAITING_GATEWAY', statusToken: 'c'.repeat(64) }) };
+    if (String(url).startsWith('/api/payments/status')) return { ok: true, json: async () => ({ status: 'SUCCESS', session: 'ACTIVE' }) };
+    throw new Error(`Unexpected request ${url}`);
+  };
+  runInNewContext(source, {
+    document: { querySelector(selector) { return elements.get(selector) || null; }, querySelectorAll() { return []; } },
+    fetch, location: { search: '?gateway=mikrotik&clientmac=aa:bb:cc:dd:ee:ff&clientip=192.0.2.1', origin: 'https://example.test', pathname: '/' },
+    history: { replaceState() {} }, URLSearchParams, Date, setTimeout: (fn, delay) => setTimeout(fn, delay === 3000 ? 0 : delay), clearTimeout, AbortController, encodeURIComponent, console
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  elements.get('#modalPhone').value = '0115613332';
+  elements.get('#modalReceipt').value = 'ABC123456';
+  listeners.get('restoreAccess')();
+  await listeners.get('paymentForm')({ preventDefault() {} });
+  assert.equal(requests.filter(request => request.url === '/api/payments/recover-login').length, 1);
+  assert.equal(requests.filter(request => request.url.startsWith('/api/payments/status')).length, 1);
+  assert.equal(elements.get('#connectionNotice').hidden, false);
+  assert.equal(modal.closed, true);
+});
