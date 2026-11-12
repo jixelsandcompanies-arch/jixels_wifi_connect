@@ -150,6 +150,14 @@ async function loadPackages() {
 }
 
 document.querySelector('.close').addEventListener('click', () => modal.close());
+document.querySelector('#changePackage')?.addEventListener('click', () => {
+  if (['starting', 'pending'].includes(paymentState)) {
+    setPaymentStatus('Wait for the payment result before changing packages. Do not submit another payment.');
+    return;
+  }
+  modal.close();
+  document.querySelector('#planGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 loadPackages();
 
 const paymentForm = document.querySelector('#paymentForm');
