@@ -93,7 +93,9 @@
       </section>
       <section class="admin-view" id="revenuePage" data-page-view="revenue" hidden>
         <section id="revenueSection" class="section-block card-section" aria-labelledby="revenueTitle">
-          <div class="section-heading"><div><h2 id="revenueTitle">Payments &amp; revenue</h2><p>Confirmed M-Pesa payments only.</p></div></div>
+          <div class="section-heading"><div><h2 id="revenueTitle">Payments &amp; revenue</h2><p>Confirmed M-Pesa payments only. Select “Already paid” to retry hotspot access.</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Package</th><th>Paid</th><th>Receipt</th><th>Access</th><th>Action</th></tr></thead><tbody id="payments"><tr><td colspan="6" class="table-message">Loading payments...</td></tr></tbody></table></div>
+          <p class="table-note">Showing up to 100 recent confirmed payments.</p>
           <div id="revenue" class="revenue-list"><p class="table-message">Loading revenue...</p></div>
           <h3 class="subheading">Sales by package</h3>
           <div id="breakdown" class="breakdown-list"><p class="table-message">Loading package sales...</p></div>

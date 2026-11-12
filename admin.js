@@ -127,6 +127,35 @@ function renderRevenue(revenue) {
   $('#breakdown').innerHTML = breakdown.length ? breakdown.map(row => `<div class="breakdown-row"><span>${escapeHtml(row.name)}<small>${Number(row.sold || 0).toLocaleString('en-KE')} sold</small></span><b>${fmt(row.revenue)}</b></div>`).join('') : '<p class="table-message">No package sales to show yet.</p>';
 }
 
+function renderPayments(payments) {
+  const rows = $('#payments');
+  if (!rows) return;
+  rows.innerHTML = payments.length ? payments.map(payment => {
+    const session = Array.isArray(payment.wifi_sessions) ? payment.wifi_sessions[0] : payment.wifi_sessions;
+    const state = session?.session_status || 'NOT PREPARED';
+    const recoverable = !session || ['GATEWAY_FAILED', 'WAITING_GATEWAY'].includes(state);
+    return `<tr><td>${escapeHtml(payment.phone || '--')}</td><td>${escapeHtml(payment.wifi_packages?.name || 'Package unavailable')}</td>
+      <td>${fmt(payment.amount_kes)}<small>${escapeHtml(kenyaTime(payment.created_at))}</small></td><td>${escapeHtml(payment.mpesa_receipt_number || 'Pending receipt')}</td>
+      <td><span class="status-pill ${statusClass(state)}">${escapeHtml(String(state).replaceAll('_', ' '))}</span></td>
+      <td><button class="action-button" type="button" data-payment-recover="${escapeHtml(payment.id)}" ${recoverable ? '' : 'disabled'}>Already paid</button></td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="table-message">No confirmed payments yet.</td></tr>';
+}
+
+async function recoverPayment(paymentId, button) {
+  if (!window.confirm('This payment is confirmed. Queue hotspot access again for this purchase?')) return;
+  button.disabled = true;
+  button.textContent = 'Queueing...';
+  try {
+    const result = await requestJson('/api/admin/payments/recover', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ paymentId }) });
+    notify(result.message || 'Paid access queued.');
+    await loadDashboard();
+  } catch (error) {
+    notify(error.message || 'Could not queue paid access.', true);
+    button.disabled = false;
+    button.textContent = 'Already paid';
+  }
+}
+
 async function loadDashboard() {
   try {
     const data = await requestJson('/api/admin/dashboard', { headers: authHeaders(), cache: 'no-store' });
@@ -138,6 +167,7 @@ async function loadDashboard() {
     renderPackages();
     renderSessions(Array.isArray(data.sessions) ? data.sessions : []);
     renderRevenue(data.revenue || {});
+    renderPayments(Array.isArray(data.payments) ? data.payments : []);
     $('#updatedAt').textContent = `Updated ${kenyaTime(new Date().toISOString())}`;
   } catch (exception) {
     if (!token) {
@@ -479,6 +509,10 @@ if ('serviceWorker' in navigator) {
     .catch(() => {});
 }
 document.addEventListener('keydown', event => { if (event.key === 'Escape') setMenu(false); });
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-payment-recover]');
+  if (button && !button.disabled) recoverPayment(button.dataset.paymentRecover, button);
+});
 
 const initialPage = document.querySelector(`.nav-link[href="${location.hash}"]`)?.dataset.page || 'overview';
 showAdminPage(initialPage);
