@@ -51,18 +51,24 @@ function Apply-Command($Command) {
 
   if ($Command.action -eq 'ALLOW') {
     $script:CurrentOperation = 'verify paid device on hotspot'
-    $hosts = @(Get-RouterItems -Path 'ip/hotspot/host' -Filters @{ 'mac-address' = $mac; address = $Command.client_ip } -Properties @('.id','mac-address','address'))
-    $host = $hosts | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac -and $_.address -eq $Command.client_ip } | Select-Object -First 1
-    if (-not $host) { throw 'The MikroTik no longer sees this client IP and MAC together. The command was not applied.' }
+    $hosts = @(Get-RouterItems -Path 'ip/hotspot/host' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address'))
+    $sameMacHosts = @($hosts | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac })
+    $clientHost = $sameMacHosts | Where-Object { $_.address -eq $Command.client_ip } | Select-Object -First 1
+    if (-not $clientHost -and $sameMacHosts.Count -eq 1) {
+      $clientHost = $sameMacHosts[0]
+      Write-AgentLog 'WARN' "Client IP changed from $($Command.client_ip) to $($clientHost.address); applying the paid grant to the same MAC."
+    }
+    if (-not $clientHost) { throw 'The MikroTik does not currently see the paid device on HotSpot. The grant remains queued until it reconnects.' }
+    $clientIp = [string]$clientHost.address
 
     $script:CurrentOperation = 'check existing hotspot login for paid device'
     $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','user'))
 
     $script:CurrentOperation = 'find existing Jixels paid-device binding'
-    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac; address = $Command.client_ip } -Properties @('.id','mac-address','address','type','comment'))
+    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
     $bindingComment = "Jixels session $($Command.session_id)"
-    $ownedBindings = @($bindings | Where-Object { ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
-    $manualBindings = @($bindings | Where-Object { -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
+    $ownedBindings = @($bindings | Where-Object { $_.comment -eq $bindingComment })
+    $manualBindings = @($bindings | Where-Object { $_.address -eq $clientIp -and -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
     if ($manualBindings.Count -gt 0) { throw 'A manually managed HotSpot IP binding matches this device. Ask the Wi-Fi administrator to review it.' }
 
     # Clear any previous authenticated session for this MAC only after
@@ -75,7 +81,7 @@ function Apply-Command($Command) {
     }
 
     $binding = $ownedBindings | Select-Object -First 1
-    $newBinding = @{ 'mac-address' = $mac; address = $Command.client_ip; type = 'bypassed'; comment = $bindingComment }
+    $newBinding = @{ 'mac-address' = $mac; address = $clientIp; type = 'bypassed'; comment = $bindingComment }
     if ($binding) {
       $script:CurrentOperation = 'update paid-device bypass binding'
       $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')

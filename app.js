@@ -6,6 +6,13 @@ let selected, portalToken = null, portalError = null, portalReady = Promise.reso
 let paymentState = 'idle';
 let recoveryMode = false;
 
+function announceConnected(message = 'Wi-Fi access is active on this device. Reconnect to Barrio- HOTSPOT if internet does not start automatically.') {
+  const notice = document.querySelector('#connectionNotice');
+  if (notice) { notice.textContent = message; notice.hidden = false; }
+  modal.close();
+  document.querySelector('#planGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function setPaymentStatus(message, loading = false) {
   document.querySelector('#modalStatusText').textContent = message;
   document.querySelector('#modalStatus').setAttribute('aria-busy', String(loading));
@@ -99,9 +106,8 @@ async function restorePaidAccess() {
     if (!response.ok) throw new Error(result.error || 'Could not restore this paid access.');
     payButton.disabled = false;
     payButton.textContent = 'Access checked';
-    setPaymentStatus(result.sessionStatus === 'ACTIVE'
-      ? 'Payment verified. Wi-Fi access is active on this device. Reconnect to Barrio- HOTSPOT if needed.'
-      : 'Payment verified. Hotspot access has been queued. Keep this device connected to Barrio- HOTSPOT and try again shortly.');
+    if (result.sessionStatus === 'ACTIVE') announceConnected('Already paid confirmed. Wi-Fi access is active on this device. Reconnect to Barrio- HOTSPOT if internet does not start automatically.');
+    else setPaymentStatus('Payment verified. Hotspot access has been queued. Keep this device connected to Barrio- HOTSPOT and try again shortly.');
   } catch (error) {
     setPaymentStatus(error.message || 'Could not restore access. Check the receipt and reconnect to the hotspot.');
     payButton.disabled = false;
@@ -234,7 +240,7 @@ const handlePaymentSubmit = async event => {
       if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
         paymentState = 'confirmed';
         payButton.textContent = 'Payment confirmed';
-        setPaymentStatus('Payment confirmed. Your Wi-Fi is now active.');
+        announceConnected('Payment confirmed. Wi-Fi access is active on this device. Reconnect to Barrio- HOTSPOT if internet does not start automatically.');
         break;
       }
       if (state.status === 'SUCCESS' && state.session === 'GATEWAY_FAILED') {
