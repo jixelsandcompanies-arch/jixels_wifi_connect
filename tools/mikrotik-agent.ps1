@@ -57,13 +57,25 @@ function Invoke-RouterRest {
 function Normalize-Mac([string]$Mac) { $Mac.Trim().ToLowerInvariant() }
 function Get-RouterItems {
   param([string]$Path, [hashtable]$Filters, [string[]]$Properties)
-  $query = @(
+  # RouterOS rejects query-string filters for some HotSpot menus on this
+  # gateway. Read the menu, then match fields locally so a bad filter cannot
+  # block paid grants or session cleanup.
+  $items = @(Invoke-RouterRest -Path $Path)
+  foreach ($item in $items) {
+    $matches = $true
     foreach ($key in $Filters.Keys) {
-      "$key=$([Uri]::EscapeDataString([string]$Filters[$key]))"
+      $property = $item.PSObject.Properties[$key]
+      if ($null -eq $property) {
+        $matches = $false
+        break
+      }
+      $actual = [string]$property.Value
+      $expected = [string]$Filters[$key]
+      if ($key -eq 'mac-address') { $actual = $actual.ToLowerInvariant(); $expected = $expected.ToLowerInvariant() }
+      if ($actual -ne $expected) { $matches = $false; break }
     }
-    ".proplist=$($Properties -join ',')"
-  )
-  Invoke-RouterRest -Path "$Path?$($query -join '&')"
+    if ($matches) { $item }
+  }
 }
 
 function Apply-Command($Command) {
