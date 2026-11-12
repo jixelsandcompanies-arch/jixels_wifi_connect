@@ -94,6 +94,18 @@ function Apply-Command($Command) {
       $script:CurrentOperation = 'create paid-device bypass binding'
       Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
     }
+
+    # Do not acknowledge the paid grant until RouterOS returns the persisted
+    # binding with the expected MAC, current IP, session comment, and bypass type.
+    $script:CurrentOperation = 'verify paid-device bypass binding'
+    $verifiedBindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac; address = $clientIp } -Properties @('.id','mac-address','address','type','comment'))
+    $verifiedBinding = $verifiedBindings | Where-Object {
+      (Normalize-Mac $_.'mac-address') -eq $mac -and
+      $_.address -eq $clientIp -and
+      $_.type -eq 'bypassed' -and
+      $_.comment -eq $bindingComment
+    } | Select-Object -First 1
+    if (-not $verifiedBinding) { throw 'RouterOS did not confirm the paid-device bypass binding. The grant remains queued for retry.' }
   } elseif ($Command.action -eq 'BLOCK') {
     $script:CurrentOperation = 'find paid-device bypass binding to remove'
     $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac; address = $Command.client_ip } -Properties @('.id','mac-address','address','type','comment'))

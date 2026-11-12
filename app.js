@@ -114,7 +114,7 @@ async function restorePaidAccess() {
         lastError = null;
         if (result.sessionStatus === 'ACTIVE') {
           payButton.textContent = 'Wi-Fi active';
-          announceConnected('Already-paid access is active on this device. Reconnect to Barrio- HOTSPOT if internet does not start automatically.');
+          announceConnected('Already-paid access has been applied to this device. Reconnect to Barrio- HOTSPOT to start browsing. If you still have no internet, contact Wi-Fi support and give them your M-Pesa receipt.');
           return;
         }
       }
@@ -260,7 +260,7 @@ const handlePaymentSubmit = async event => {
       if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
         paymentState = 'confirmed';
         payButton.textContent = 'Payment confirmed';
-        announceConnected('Payment confirmed. Wi-Fi access is active on this device. Reconnect to Barrio- HOTSPOT if internet does not start automatically.');
+        announceConnected('Payment confirmed and hotspot access applied. Reconnect to Barrio- HOTSPOT to start browsing. If you still have no internet, contact Wi-Fi support and give them your M-Pesa receipt.');
         break;
       }
       if (state.status === 'SUCCESS' && state.session === 'GATEWAY_FAILED') {

@@ -35,12 +35,20 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: 'That payment belongs to a different device. Reopen the sign-in page on the device that paid.' });
   }
 
-  const { data: priorSession, error: sessionError } = await db.from('wifi_sessions').select('id,session_status').eq('payment_id', payment.id).maybeSingle();
+  const { data: priorSession, error: sessionError } = await db.from('wifi_sessions').select('id,session_status,expiry_time').eq('payment_id', payment.id).maybeSingle();
   if (sessionError) return res.status(503).json({ error: 'Could not load the paid hotspot session.' });
-  if (priorSession && !['ACTIVE', 'WAITING_GATEWAY', 'GATEWAY_FAILED'].includes(priorSession.session_status)) {
+  if (priorSession && !['ACTIVE', 'WAITING_GATEWAY', 'GATEWAY_FAILED', 'EXPIRED'].includes(priorSession.session_status)) {
     return res.status(409).json({ error: 'This confirmed payment session has expired. Choose a package to buy new access.' });
   }
   try {
+    // An ACTIVE database row can outlive the device's router binding (for
+    // example after a router reset). Let a customer with a valid receipt
+    // requeue the grant for this same device instead of reporting stale access.
+    if (priorSession && ['ACTIVE', 'EXPIRED'].includes(priorSession.session_status) && new Date(priorSession.expiry_time) > new Date()) {
+      const { error: resetError } = await db.from('wifi_sessions').update({ session_status: 'GATEWAY_FAILED' })
+        .eq('id', priorSession.id).eq('session_status', 'ACTIVE');
+      if (resetError) throw resetError;
+    }
     const session = await activateConfirmedPayment(db, payment, payment.raw_callback || {});
     return res.status(200).json({ success: true, sessionStatus: session?.session_status || 'WAITING_GATEWAY' });
   } catch (activationError) {

@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   if (error) return res.status(500).json({ error: 'Could not read payment status' });
   if (!data) return res.status(404).json({ error: 'Payment not found' });
   let session = Array.isArray(data.wifi_sessions) ? data.wifi_sessions[0] : data.wifi_sessions;
-  if (data.status === 'SUCCESS' && isMikrotikAgentMode() && ['GATEWAY_FAILED', 'WAITING_GATEWAY'].includes(session?.session_status)) {
+  if (data.status === 'SUCCESS' && isMikrotikAgentMode() && ['GATEWAY_FAILED', 'WAITING_GATEWAY', 'EXPIRED'].includes(session?.session_status)) {
     const { data: payment } = await db.from('payments').select('*, wifi_packages(*)').eq('id', data.id).maybeSingle();
     if (payment) {
       try { await activateConfirmedPayment(db, payment, payment.raw_callback || {}); }
