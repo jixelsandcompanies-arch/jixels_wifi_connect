@@ -28,6 +28,7 @@
   <main>
     <h2>Choose Your Internet Package</h2>
     <p class="intro">Select a package that fits your needs and pay securely with M-Pesa.</p>
+    <button id="restoreAccess" class="restore-access" type="button">Already paid? Restore access</button>
     <section id="planGrid" class="plans"><p>Loading packages...</p></section>
     <section class="mpesa">
       <b>Pay with M-Pesa</b>
@@ -46,6 +47,7 @@
       <div class="choice selected"><b>Pay for this device</b><small>Access is activated for this connected device. Enter only the M-Pesa number for the payment prompt.</small></div>
       <form id="paymentForm" novalidate>
         <label>M-Pesa phone number<input id="modalPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="13" placeholder="07XXXXXXXX"></label>
+        <label id="modalReceiptLabel" hidden>M-Pesa receipt<input id="modalReceipt" type="text" maxlength="20" autocomplete="off" placeholder="e.g. QWE123ABC"></label>
         <button class="modalPay" type="submit" id="modalPay"></button>
       </form>
       <p id="modalStatus" aria-live="polite" aria-busy="false"><span id="modalStatusText">Your M-Pesa PIN is entered only in the official prompt on your phone - never here.</span></p>

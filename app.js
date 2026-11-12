@@ -4,6 +4,7 @@ const fmt = value => `KSh ${Number(value).toLocaleString('en-KE')}`;
 const duration = minutes => minutes === 90 ? '1 hour 30 minutes' : minutes >= 1440 ? `${minutes / 1440} days` : minutes >= 60 ? `${minutes / 60} hours` : `${minutes} minutes`;
 let selected, portalToken = null, portalError = null, portalReady = Promise.resolve();
 let paymentState = 'idle';
+let recoveryMode = false;
 
 function setPaymentStatus(message, loading = false) {
   document.querySelector('#modalStatusText').textContent = message;
@@ -56,6 +57,13 @@ if (fas) {
 }
 
 function openPackage(item) {
+  recoveryMode = false;
+  const receiptLabel = document.querySelector('#modalReceiptLabel');
+  if (receiptLabel) receiptLabel.hidden = true;
+  const phoneLabel = document.querySelector('#modalPhone').closest?.('label');
+  if (phoneLabel) phoneLabel.hidden = false;
+  const choice = document.querySelector('.choice');
+  if (choice) choice.hidden = false;
   selected = item;
   document.querySelectorAll('.plan').forEach(card => card.classList.toggle('selected', card.dataset.packageId === item.id));
   document.querySelector('#modalName').textContent = item.name;
@@ -71,6 +79,34 @@ function openPackage(item) {
     payButton.textContent = paymentState === 'pending' || paymentState === 'starting' ? 'Payment in progress' : paymentState === 'confirmed' ? 'Payment confirmed' : 'Payment already submitted';
   }
   modal.showModal();
+}
+
+async function restorePaidAccess() {
+  const payButton = document.querySelector('#modalPay');
+  const phone = normalizeKenyanPhone(document.querySelector('#modalPhone').value);
+  const receipt = document.querySelector('#modalReceipt').value.trim().toUpperCase();
+  if (!phone) { setPaymentStatus('Enter the Kenyan M-Pesa phone number used for payment.'); return; }
+  if (!/^[A-Z0-9]{6,20}$/.test(receipt)) { setPaymentStatus('Enter the M-Pesa receipt from your payment message.'); return; }
+  await portalReady;
+  if (portalError) { setPaymentStatus(portalError); return; }
+  if (!portalToken) { setPaymentStatus('Reconnect to Barrio- HOTSPOT and open this page from its sign-in screen on the device that paid.'); return; }
+  payButton.disabled = true;
+  payButton.textContent = 'Checking payment...';
+  setPaymentStatus('Verifying the payment and this device...', true);
+  try {
+    const response = await fetchWithTimeout('/api/payments/recover-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ portalToken, phone, receipt }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not restore this paid access.');
+    payButton.disabled = false;
+    payButton.textContent = 'Access checked';
+    setPaymentStatus(result.sessionStatus === 'ACTIVE'
+      ? 'Payment verified. Wi-Fi access is active on this device. Reconnect to Barrio- HOTSPOT if needed.'
+      : 'Payment verified. Hotspot access has been queued. Keep this device connected to Barrio- HOTSPOT and try again shortly.');
+  } catch (error) {
+    setPaymentStatus(error.message || 'Could not restore access. Check the receipt and reconnect to the hotspot.');
+    payButton.disabled = false;
+    payButton.textContent = 'Restore access';
+  }
 }
 
 function renderPackages(packages) {
@@ -120,6 +156,7 @@ const paymentForm = document.querySelector('#paymentForm');
 const payButton = document.querySelector('#modalPay');
 const handlePaymentSubmit = async event => {
   event.preventDefault();
+  if (recoveryMode) { await restorePaidAccess(); return; }
   console.log('Pay clicked');
   if (paymentState !== 'idle') {
     setPaymentStatus(paymentState === 'pending' || paymentState === 'starting' || paymentState === 'verifying'
@@ -220,4 +257,19 @@ paymentForm.addEventListener('submit', handlePaymentSubmit);
 payButton.addEventListener('click', event => {
   event.preventDefault();
   handlePaymentSubmit(event);
+});
+
+document.querySelector('#restoreAccess')?.addEventListener('click', () => {
+  recoveryMode = true;
+  document.querySelector('#modalName').textContent = 'Restore paid Wi-Fi access';
+  document.querySelector('#modalPrice').textContent = 'No new payment';
+  document.querySelector('#modalDescription').textContent = 'Enter the phone number and M-Pesa receipt for the payment made on this device.';
+  const choice = document.querySelector('.choice');
+  if (choice) choice.hidden = true;
+  document.querySelector('#modalReceiptLabel').hidden = false;
+  document.querySelector('#modalPhone').closest('label').hidden = false;
+  payButton.disabled = false;
+  payButton.textContent = 'Restore access';
+  setPaymentStatus('We will verify your receipt and this connected device. No new payment will be started.');
+  modal.showModal();
 });
