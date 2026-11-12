@@ -58,8 +58,10 @@ function Apply-Command($Command) {
       $clientHost = $sameMacHosts[0]
       Write-AgentLog 'WARN' "Client IP changed from $($Command.client_ip) to $($clientHost.address); applying the paid grant to the same MAC."
     }
-    if (-not $clientHost) { throw 'The MikroTik does not currently see the paid device on HotSpot. The grant remains queued until it reconnects.' }
-    $clientIp = [string]$clientHost.address
+    $clientIp = if ($clientHost) { [string]$clientHost.address } else { '' }
+    if (-not $clientHost) {
+      Write-AgentLog 'WARN' 'The MikroTik does not currently list this paid MAC as a HotSpot host; preparing a MAC-only bypass so access applies when it reconnects.'
+    }
 
     $script:CurrentOperation = 'check existing hotspot login for paid device'
     $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','user'))
@@ -68,7 +70,10 @@ function Apply-Command($Command) {
     $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
     $bindingComment = "Jixels session $($Command.session_id)"
     $ownedBindings = @($bindings | Where-Object { $_.comment -eq $bindingComment })
-    $manualBindings = @($bindings | Where-Object { $_.address -eq $clientIp -and -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
+    $manualBindings = @($bindings | Where-Object {
+      -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) -and
+      ((-not $clientIp) -or $_.address -eq $clientIp)
+    })
     if ($manualBindings.Count -gt 0) { throw 'A manually managed HotSpot IP binding matches this device. Ask the Wi-Fi administrator to review it.' }
 
     # Clear any previous authenticated session for this MAC only after
@@ -81,8 +86,9 @@ function Apply-Command($Command) {
     }
 
     $binding = $ownedBindings | Select-Object -First 1
-    $newBinding = @{ 'mac-address' = $mac; address = $clientIp; type = 'bypassed'; comment = $bindingComment }
-    if ($binding) {
+    $newBinding = @{ 'mac-address' = $mac; type = 'bypassed'; comment = $bindingComment }
+    if ($clientIp) { $newBinding.address = $clientIp }
+    if ($binding -and $clientIp) {
       $script:CurrentOperation = 'update paid-device bypass binding'
       $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
       Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Patch -Body $newBinding | Out-Null
@@ -91,6 +97,13 @@ function Apply-Command($Command) {
         Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
       }
     } else {
+      # Recreate a stale address-specific entry as MAC-only when the client is
+      # offline. RouterOS supports MAC-only static HotSpot bindings, so the
+      # paid authorization is ready for the device's next connection.
+      foreach ($ownedBinding in $ownedBindings) {
+        $encodedId = [Uri]::EscapeDataString([string]$ownedBinding.'.id')
+        Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
+      }
       $script:CurrentOperation = 'create paid-device bypass binding'
       Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
     }
@@ -98,17 +111,17 @@ function Apply-Command($Command) {
     # Do not acknowledge the paid grant until RouterOS returns the persisted
     # binding with the expected MAC, current IP, session comment, and bypass type.
     $script:CurrentOperation = 'verify paid-device bypass binding'
-    $verifiedBindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac; address = $clientIp } -Properties @('.id','mac-address','address','type','comment'))
+    $verifiedBindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
     $verifiedBinding = $verifiedBindings | Where-Object {
       (Normalize-Mac $_.'mac-address') -eq $mac -and
-      $_.address -eq $clientIp -and
+      ((-not $clientIp) -or $_.address -eq $clientIp) -and
       $_.type -eq 'bypassed' -and
       $_.comment -eq $bindingComment
     } | Select-Object -First 1
     if (-not $verifiedBinding) { throw 'RouterOS did not confirm the paid-device bypass binding. The grant remains queued for retry.' }
   } elseif ($Command.action -eq 'BLOCK') {
     $script:CurrentOperation = 'find paid-device bypass binding to remove'
-    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac; address = $Command.client_ip } -Properties @('.id','mac-address','address','type','comment'))
+    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
     $bindingComment = "Jixels session $($Command.session_id)"
     foreach ($binding in ($bindings | Where-Object { $_.comment -eq $bindingComment })) {
       $script:CurrentOperation = 'remove expired paid-device bypass binding'
