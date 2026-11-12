@@ -44,9 +44,8 @@ export default async function handler(req, res) {
     return res.status(409).json({ error: 'This paid Wi-Fi time has expired. Choose a package to buy new access.' });
   }
   try {
-    // An ACTIVE database row can outlive the device's router binding (for
-    // example after a router reset). Let a customer with a valid receipt
-    // requeue the grant for this same device instead of reporting stale access.
+    // Retrying an in-flight command is idempotent: queueMikrotikRouterCommand
+    // reuses the session's ALLOW. For a stale ACTIVE row, reopen the grant.
     if (priorSession && ['ACTIVE', 'EXPIRED'].includes(priorSession.session_status) && new Date(priorSession.expiry_time) > new Date()) {
       const { error: resetError } = await db.from('wifi_sessions').update({ session_status: 'GATEWAY_FAILED' })
         .eq('id', priorSession.id).in('session_status', ['ACTIVE', 'EXPIRED']);

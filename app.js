@@ -94,12 +94,12 @@ async function restorePaidAccess() {
   const receipt = document.querySelector('#modalReceipt').value.trim().toUpperCase();
   if (!phone) { setPaymentStatus('Enter the Kenyan M-Pesa phone number used for payment.'); return; }
   if (!/^[A-Z0-9]{6,20}$/.test(receipt)) { setPaymentStatus('Enter the M-Pesa receipt from your payment message.'); return; }
-  await portalReady;
-  if (portalError) { setPaymentStatus(portalError); return; }
-  if (!portalToken) { setPaymentStatus('Reconnect to Barrio- HOTSPOT and open this page from its sign-in screen on the device that paid.'); return; }
   payButton.disabled = true;
   payButton.textContent = 'Checking Wi-Fi access...';
   setPaymentStatus('Verifying your receipt and asking the hotspot to activate Wi-Fi...', true);
+  await portalReady;
+  if (portalError) { setPaymentStatus(portalError); payButton.disabled = false; payButton.textContent = 'Restore access'; return; }
+  if (!portalToken) { setPaymentStatus('Reconnect to Barrio- HOTSPOT and open this page from its sign-in screen on the device that paid.'); payButton.disabled = false; payButton.textContent = 'Restore access'; return; }
   try {
     const response = await fetchWithTimeout('/api/payments/recover-login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ portalToken, phone, receipt })
@@ -108,19 +108,19 @@ async function restorePaidAccess() {
     if (!response.ok) throw new Error(result.error || 'Could not verify this payment.');
     if (result.sessionStatus === 'ACTIVE') {
       payButton.textContent = 'Wi-Fi active';
-      announceConnected('Already-paid access has been applied to this device. Reconnect to Barrio- HOTSPOT to start browsing. If you still have no internet, contact Wi-Fi support and give them your M-Pesa receipt.');
+      announceConnected('The hotspot authorized this device for your paid session. Reconnect to Barrio- HOTSPOT. If internet still does not work, contact Wi-Fi support with your M-Pesa receipt.');
       return;
     }
 
     const statusToken = String(result.statusToken || '');
     if (!/^[a-f0-9]{64}$/.test(statusToken)) throw new Error('Payment verified, but the hotspot status check could not start. Try again shortly.');
-    const deadline = Date.now() + 25000;
+    const deadline = Date.now() + 12000;
     let lastError = '';
     let attempt = 0;
     while (Date.now() < deadline) {
       if (attempt > 0) {
-        setPaymentStatus('Receipt verified. Applying Wi-Fi now; keep this device connected and do not pay again.', true);
-        await new Promise(resolve => setTimeout(resolve, Math.min(2000, 500 + attempt * 125)));
+        setPaymentStatus('Payment verified. Waiting for the hotspot to confirm access; do not pay again.', true);
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
       attempt++;
       try {
@@ -129,7 +129,7 @@ async function restorePaidAccess() {
         if (!check.ok) lastError = state.error || 'The hotspot status check is temporarily unavailable.';
         else if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
           payButton.textContent = 'Wi-Fi active';
-          announceConnected('Already-paid access has been applied to this device. Reconnect to Barrio- HOTSPOT to start browsing. If you still have no internet, contact Wi-Fi support and give them your M-Pesa receipt.');
+          announceConnected('The hotspot authorized this device for your paid session. Reconnect to Barrio- HOTSPOT. If internet still does not work, contact Wi-Fi support with your M-Pesa receipt.');
           return;
         }
       } catch (statusError) {
@@ -138,7 +138,7 @@ async function restorePaidAccess() {
     }
     payButton.disabled = false;
     payButton.textContent = 'Check access again';
-    setPaymentStatus(`Payment is verified, but the hotspot has not confirmed access yet. Keep this device connected and do not pay again.${lastError ? ` ${lastError}` : ''} Try again shortly or contact Wi-Fi support.`, false);
+    setPaymentStatus(`Payment is verified, but the hotspot has not confirmed access yet. Your payment is safe; do not pay again. Press “Check access again” in a moment.${lastError ? ` (${lastError})` : ''}`, false);
   } catch (error) {
     setPaymentStatus(error.message || 'Could not restore access. Check the receipt and reconnect to the hotspot.');
     payButton.disabled = false;
@@ -254,7 +254,7 @@ const handlePaymentSubmit = async event => {
     payButton.textContent = 'Payment in progress';
     console.log('STK sent', result.checkoutRequestId);
     setPaymentStatus('Check your phone for STK Push - Enter PIN', true);
-    const deadline = Date.now() + 5 * 60_000;
+    const deadline = Date.now() + 30_000;
     let paymentConfirmed = false;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 3000));
@@ -273,14 +273,15 @@ const handlePaymentSubmit = async event => {
       if (state.status === 'SUCCESS' && state.session === 'ACTIVE') {
         paymentState = 'confirmed';
         payButton.textContent = 'Payment confirmed';
-        announceConnected('Payment confirmed and hotspot access applied. Reconnect to Barrio- HOTSPOT to start browsing. If you still have no internet, contact Wi-Fi support and give them your M-Pesa receipt.');
+        announceConnected('Payment confirmed and the hotspot authorized this device for the paid session. Reconnect to Barrio- HOTSPOT. If internet still does not work, contact Wi-Fi support with your M-Pesa receipt.');
         break;
       }
-      if (state.status === 'SUCCESS' && state.session === 'GATEWAY_FAILED') {
+      if (state.status === 'SUCCESS' && ['GATEWAY_FAILED', 'WAITING_GATEWAY'].includes(state.session)) {
         paymentState = 'pending';
         payButton.textContent = 'Payment received';
-        setPaymentStatus('Payment is confirmed. The hotspot is retrying your access grant. Keep this device connected; do not pay again.', true);
-        continue;
+        setPaymentStatus('Payment is confirmed, but hotspot authorization is still pending. Do not pay again; use “Already paid? Restore access” to retry.', false);
+        paymentState = 'activation_pending';
+        break;
       }
       if (state.status === 'SUCCESS') setPaymentStatus('Payment is confirmed. The hotspot is applying access now...', true);
     }
@@ -288,7 +289,7 @@ const handlePaymentSubmit = async event => {
       paymentState = paymentConfirmed ? 'activation_pending' : 'timeout';
       payButton.textContent = paymentConfirmed ? 'Payment received' : 'Payment submitted';
       setPaymentStatus(paymentConfirmed
-        ? 'Payment is confirmed, but the hotspot has not confirmed access yet. Use Already paid? Restore access below to check and retry. Do not pay again.'
+        ? 'Payment is confirmed, but the hotspot has not confirmed authorization. Use Already paid? Restore access to retry. Do not pay again.'
         : 'This payment is still being confirmed. Do not submit another payment. If Wi-Fi does not activate, contact support with your M-Pesa message.');
     }
   } catch (error) {
