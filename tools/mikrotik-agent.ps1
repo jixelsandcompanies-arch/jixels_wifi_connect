@@ -31,7 +31,27 @@ function Invoke-RouterRest {
   param([string]$Path, [string]$Method = 'Get', $Body = $null)
   $params = @{ Uri = "$routerRoot/$Path"; Method = $Method; Headers = $routerHeaders; TimeoutSec = 12 }
   if ($null -ne $Body) { $params.ContentType = 'application/json'; $params.Body = ($Body | ConvertTo-Json -Compress -Depth 6) }
-  Invoke-RestMethod @params
+  try {
+    Invoke-RestMethod @params
+  } catch {
+    $detail = [string]$_.ErrorDetails.Message
+    $response = $_.Exception.Response
+    if (-not $detail -and $response) {
+      try {
+        $stream = $response.GetResponseStream()
+        if ($stream) {
+          $reader = [System.IO.StreamReader]::new($stream)
+          try { $detail = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+      } catch { }
+    }
+    if ($detail) {
+      $statusCode = 0
+      try { $statusCode = [int]$response.StatusCode } catch { }
+      throw "RouterOS REST $Method $Path failed (HTTP $statusCode): $detail"
+    }
+    throw
+  }
 }
 
 function Normalize-Mac([string]$Mac) { $Mac.Trim().ToLowerInvariant() }
