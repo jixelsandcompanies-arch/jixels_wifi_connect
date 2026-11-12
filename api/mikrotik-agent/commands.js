@@ -20,14 +20,27 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Could not record MikroTik agent heartbeat' });
     }
     const gatewayId = mikrotikGatewayId();
-    const { data, error } = await db.from('mikrotik_router_commands').select('id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,hotspot_password,attempts').eq('status', 'PENDING').eq('gateway_id', gatewayId).order('created_at').limit(20);
-    if (error) {
-      console.error('MikroTik agent command lookup failed', { code: error.code, message: error.message, gatewayId });
+    const fields = 'id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,hotspot_password,attempts';
+    const { data: grants, error: grantError } = await db.from('mikrotik_router_commands').select(fields)
+      .eq('status', 'PENDING').eq('gateway_id', gatewayId).eq('action', 'ALLOW').order('created_at').limit(20);
+    if (grantError) {
+      console.error('MikroTik paid grant lookup failed', { code: grantError.code, message: grantError.message, gatewayId });
       return res.status(500).json({ error: 'Could not load MikroTik commands' });
     }
-    console.info('MikroTik agent poll completed', { gatewayId, pendingCommands: data.length });
+    let commands = grants || [];
+    const remaining = 20 - commands.length;
+    if (remaining > 0) {
+      const { data: cleanup, error: cleanupError } = await db.from('mikrotik_router_commands').select(fields)
+        .eq('status', 'PENDING').eq('gateway_id', gatewayId).eq('action', 'BLOCK').order('created_at').limit(remaining);
+      if (cleanupError) {
+        console.error('MikroTik cleanup command lookup failed', { code: cleanupError.code, message: cleanupError.message, gatewayId });
+        return res.status(500).json({ error: 'Could not load MikroTik commands' });
+      }
+      commands = commands.concat(cleanup || []);
+    }
+    console.info('MikroTik agent poll completed', { gatewayId, pendingGrants: grants.length, pendingCleanup: commands.length - grants.length });
     res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).json({ commands: data });
+    return res.status(200).json({ commands });
   }
   if (req.method === 'POST') {
     const { type, routerOnline, commandId, ok, permanent = false, message = '' } = req.body || {};
