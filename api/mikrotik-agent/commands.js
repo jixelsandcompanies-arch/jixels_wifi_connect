@@ -21,24 +21,26 @@ export default async function handler(req, res) {
     }
     const gatewayId = mikrotikGatewayId();
     const fields = 'id,session_id,gateway_id,mac_address,client_ip,action,duration_minutes,hotspot_username,hotspot_password,attempts';
-    const { data: grants, error: grantError } = await db.from('mikrotik_router_commands').select(fields)
-      .eq('status', 'PENDING').eq('gateway_id', gatewayId).eq('action', 'ALLOW').order('created_at').limit(20);
-    if (grantError) {
-      console.error('MikroTik paid grant lookup failed', { code: grantError.code, message: grantError.message, gatewayId });
+    // Revocations must not wait behind a full batch of new grants.
+    const { data: cleanup, error: cleanupError } = await db.from('mikrotik_router_commands').select(fields)
+      .eq('status', 'PENDING').eq('gateway_id', gatewayId).eq('action', 'BLOCK').order('created_at').limit(20);
+    if (cleanupError) {
+      console.error('MikroTik cleanup command lookup failed', { code: cleanupError.code, message: cleanupError.message, gatewayId });
       return res.status(500).json({ error: 'Could not load MikroTik commands' });
     }
-    let commands = grants || [];
-    const remaining = 20 - commands.length;
+    const remaining = 20 - (cleanup || []).length;
+    let grants = [];
     if (remaining > 0) {
-      const { data: cleanup, error: cleanupError } = await db.from('mikrotik_router_commands').select(fields)
-        .eq('status', 'PENDING').eq('gateway_id', gatewayId).eq('action', 'BLOCK').order('created_at').limit(remaining);
-      if (cleanupError) {
-        console.error('MikroTik cleanup command lookup failed', { code: cleanupError.code, message: cleanupError.message, gatewayId });
+      const { data, error: grantError } = await db.from('mikrotik_router_commands').select(fields)
+        .eq('status', 'PENDING').eq('gateway_id', gatewayId).eq('action', 'ALLOW').order('created_at').limit(remaining);
+      if (grantError) {
+        console.error('MikroTik paid grant lookup failed', { code: grantError.code, message: grantError.message, gatewayId });
         return res.status(500).json({ error: 'Could not load MikroTik commands' });
       }
-      commands = commands.concat(cleanup || []);
+      grants = data || [];
     }
-    console.info('MikroTik agent poll completed', { gatewayId, pendingGrants: grants.length, pendingCleanup: commands.length - grants.length });
+    const commands = (cleanup || []).concat(grants);
+    console.info('MikroTik agent poll completed', { gatewayId, pendingGrants: grants.length, pendingCleanup: (cleanup || []).length });
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({ commands });
   }

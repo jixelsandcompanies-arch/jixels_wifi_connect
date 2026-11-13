@@ -8,7 +8,9 @@ export default async function handler(req, res) {
   // ALLOW. If a grant is still WAITING_GATEWAY at its stored expiry, cancel it
   // and queue BLOCK as a failsafe against a router write that succeeded while
   // its acknowledgement was lost.
-  const expirableStatuses = ['ACTIVE','WAITING_GATEWAY'];
+  const expirableStatuses = isMikrotikAgentMode()
+    ? ['ACTIVE','WAITING_GATEWAY','GATEWAY_FAILED']
+    : ['ACTIVE','WAITING_GATEWAY'];
   const { data: sessions, error } = await db.from('wifi_sessions').select('id,session_status').in('session_status', expirableStatuses).lte('expiry_time', now);
   if (error) return res.status(500).json({ error: error.message });
   if (isTyraxAgentMode()) {
@@ -30,14 +32,23 @@ export default async function handler(req, res) {
       const { data: wifiSession } = await db.from('wifi_sessions').select('payment_id').eq('id', session.id).single();
       const { data: payment } = await db.from('payments').select('mikrotik_portal_context_id,wifi_packages(duration_minutes)').eq('id', wifiSession?.payment_id).maybeSingle();
       const { data: context } = await db.from('mikrotik_portal_contexts').select('gateway_id,mac_address,client_ip').eq('id', payment?.mikrotik_portal_context_id).maybeSingle();
-      if (!payment || !context) continue;
+      if (!payment || !context) {
+        console.error('Expired MikroTik session is missing its payment or portal context', { sessionId: session.id, hasPayment: Boolean(payment), hasContext: Boolean(context) });
+        continue;
+      }
+      if (session.session_status === 'GATEWAY_FAILED') {
+        const { error: resetError } = await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' })
+          .eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
+        if (resetError) throw resetError;
+      }
       await queueMikrotikRouterCommand({ sessionId: session.id, gatewayId: context.gateway_id, macAddress: context.mac_address, clientIp: context.client_ip, action: 'BLOCK', durationMinutes: payment.wifi_packages?.duration_minutes || 1 });
-      await db.from('mikrotik_router_commands').update({ status: 'CANCELLED', last_error: 'Session expired before device authorization' }).eq('session_id', session.id).eq('action', 'ALLOW').eq('status', 'PENDING');
+      const { error: cancelError } = await db.from('mikrotik_router_commands').update({ status: 'CANCELLED', last_error: 'Session expired before device authorization' }).eq('session_id', session.id).eq('action', 'ALLOW').eq('status', 'PENDING');
+      if (cancelError) throw cancelError;
       // Keep the session ACTIVE until the agent confirms that the router has
       // removed the bypass. The BLOCK acknowledgement marks it EXPIRED via
       // complete_mikrotik_router_command; a queued command is not revocation.
     }
-    const { data: stuck } = await db.from('wifi_sessions').select('id,payment_id').eq('session_status', 'GATEWAY_FAILED').limit(50);
+    const { data: stuck } = await db.from('wifi_sessions').select('id,payment_id').eq('session_status', 'GATEWAY_FAILED').gt('expiry_time', now).limit(50);
     let retried = 0;
     for (const session of stuck || []) {
       const { data: payment } = await db.from('payments').select('mikrotik_portal_context_id,wifi_packages(duration_minutes)').eq('id', session.payment_id).maybeSingle();

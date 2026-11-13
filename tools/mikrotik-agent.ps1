@@ -61,6 +61,11 @@ function Invoke-RouterRest {
 }
 
 function Normalize-Mac([string]$Mac) { $Mac.Trim().ToLowerInvariant() }
+function Get-RouterItemPathId([string]$Id) {
+  # RouterOS REST item IDs begin with '*'. RouterOS requires the asterisk to
+  # stay literal in the path and does not decode its %2A escape sequence.
+  return ([Uri]::EscapeDataString($Id)).Replace('%2A', '*').Replace('%2a', '*')
+}
 function Get-RouterItems {
   param([string]$Path, [hashtable]$Filters, [string[]]$Properties)
   # Use RouterOS's print command with a .query and .proplist body so the
@@ -100,12 +105,12 @@ function Apply-Command($Command) {
 
     if ($ownedBindings.Count -gt 0) {
       $targetBinding = $ownedBindings[0]
-      $encodedId = [Uri]::EscapeDataString([string]$targetBinding.'.id')
+      $encodedId = Get-RouterItemPathId ([string]$targetBinding.'.id')
       $script:CurrentOperation = 'update existing paid-device bypass binding'
       Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Patch -Body $newBinding | Out-Null
       foreach ($duplicate in @($ownedBindings | Select-Object -Skip 1)) {
         $script:CurrentOperation = 'remove duplicate paid-device bypass binding'
-        $duplicateId = [Uri]::EscapeDataString([string]$duplicate.'.id')
+        $duplicateId = Get-RouterItemPathId ([string]$duplicate.'.id')
         Invoke-RouterRest -Path "ip/hotspot/ip-binding/$duplicateId" -Method Delete | Out-Null
       }
     } else {
@@ -114,27 +119,31 @@ function Apply-Command($Command) {
     }
   } elseif ($Command.action -eq 'BLOCK') {
     $bindingComment = "Jixels session $($Command.session_id)"
-    # Locate this session's binding by its unique comment. RouterOS may
-    # normalize MAC address casing, so filtering by the original MAC can miss
-    # an otherwise valid bypass and leave the device online past expiry.
+    # Find the client's small binding set by MAC, then match this session's
+    # comment locally. This avoids relying on a comment query for revocation.
     $script:CurrentOperation = 'find paid-device bypass binding to remove'
-    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ comment = $bindingComment } -Properties @('.id','mac-address','address','type','comment'))
-    foreach ($binding in ($bindings | Where-Object { $_.comment -eq $bindingComment -and (Normalize-Mac $_.'mac-address') -eq $mac })) {
+    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
+    $sessionBindings = @($bindings | Where-Object { $_.comment -eq $bindingComment -and (Normalize-Mac $_.'mac-address') -eq $mac })
+    foreach ($binding in $sessionBindings) {
       # Remove only this session's bypass rule. This returns the device to
       # normal HotSpot authentication so its next request reaches the billing
       # portal. The HotSpot host table itself is read-only and must not be
       # deleted from.
       $script:CurrentOperation = 'remove expired paid-device bypass binding'
-      $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
+      $encodedId = Get-RouterItemPathId ([string]$binding.'.id')
       Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
     }
+    $script:CurrentOperation = 'verify expired paid-device bypass was removed'
+    $remainingBindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','comment'))
+    $stillAuthorized = @($remainingBindings | Where-Object { $_.comment -eq $bindingComment -and (Normalize-Mac $_.'mac-address') -eq $mac })
+    if ($stillAuthorized.Count -gt 0) { throw 'RouterOS still reports the expired Jixels bypass binding; expiry remains pending.' }
 
     # Also clean up entries created by the previous credential-based agent.
     $script:CurrentOperation = 'find active paid hotspot login to remove'
     $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac; user = $Command.hotspot_username } -Properties @('.id','mac-address','user'))
     foreach ($client in ($active | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac -and $_.user -eq $Command.hotspot_username })) {
       $script:CurrentOperation = 'remove expired hotspot login'
-      $encodedId = [Uri]::EscapeDataString([string]$client.'.id')
+      $encodedId = Get-RouterItemPathId ([string]$client.'.id')
       Invoke-RouterRest -Path "ip/hotspot/active/$encodedId" -Method Delete | Out-Null
     }
     $script:CurrentOperation = 'find expired temporary hotspot user'
@@ -142,7 +151,7 @@ function Apply-Command($Command) {
     $user = $users | Where-Object { $_.name -eq $Command.hotspot_username } | Select-Object -First 1
     if ($user) {
       $script:CurrentOperation = 'remove expired temporary hotspot user'
-      $encodedId = [Uri]::EscapeDataString([string]$user.'.id')
+      $encodedId = Get-RouterItemPathId ([string]$user.'.id')
       Invoke-RouterRest -Path "ip/hotspot/user/$encodedId" -Method Delete | Out-Null
     }
   } else { throw "Unsupported router action: $($Command.action)" }
@@ -159,7 +168,7 @@ try {
   foreach ($binding in ($staleBlockedBindings | Where-Object { $_.type -eq 'blocked' -and ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })) {
     try {
       $script:CurrentOperation = 'remove stale Jixels blocked binding'
-      $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
+      $encodedId = Get-RouterItemPathId ([string]$binding.'.id')
       Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
       Write-AgentLog 'WARN' "Removed a stale Jixels blocked binding $($binding.'.id'); the device can return to the billing portal."
     } catch {
