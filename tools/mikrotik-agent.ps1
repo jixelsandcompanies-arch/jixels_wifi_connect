@@ -115,7 +115,33 @@ function Apply-Command($Command) {
       }
     } else {
       $script:CurrentOperation = 'create paid-device bypass binding'
-      Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
+      try {
+        Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
+      } catch {
+        if ($_.Exception.Message -notmatch '(?i)such client already exists') { throw }
+
+        # RouterOS can reject PUT because the client exists even when its
+        # filtered print did not return it (for example, after a casing or
+        # concurrent-command race). Re-read the small binding table and
+        # reconcile the Jixels-owned row instead of retrying the same PUT.
+        $script:CurrentOperation = 'recover existing client after duplicate binding response'
+        $allBindings = @(Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Get)
+        $matchingBindings = @($allBindings | Where-Object { (Normalize-Mac ([string]$_.'mac-address')) -eq $mac })
+        $ownedBindings = @($matchingBindings | Where-Object { ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
+        $manualBindings = @($matchingBindings | Where-Object { -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
+        if ($manualBindings.Count -gt 0) { throw 'RouterOS has a manually managed binding for this device. It was left unchanged; ask the Wi-Fi administrator to review it.' }
+        if ($ownedBindings.Count -eq 0) { throw 'RouterOS reported that this client already exists, but its binding could not be identified. The grant remains pending for retry.' }
+
+        $targetBinding = $ownedBindings[0]
+        $targetId = Get-RouterItemPathId ([string]$targetBinding.'.id')
+        $script:CurrentOperation = 'update existing paid-device binding after duplicate response'
+        Invoke-RouterRest -Path "ip/hotspot/ip-binding/$targetId" -Method Patch -Body $newBinding | Out-Null
+        foreach ($duplicate in @($ownedBindings | Select-Object -Skip 1)) {
+          $duplicateId = Get-RouterItemPathId ([string]$duplicate.'.id')
+          $script:CurrentOperation = 'remove duplicate paid-device bypass binding'
+          Invoke-RouterRest -Path "ip/hotspot/ip-binding/$duplicateId" -Method Delete | Out-Null
+        }
+      }
     }
   } elseif ($Command.action -eq 'BLOCK') {
     $bindingComment = "Jixels session $($Command.session_id)"
