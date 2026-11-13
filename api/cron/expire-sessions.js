@@ -4,7 +4,10 @@ import { isMikrotikAgentMode, isTyraxAgentMode, queueMikrotikRouterCommand, queu
 export default async function handler(req, res) {
   if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).end();
   const db = supabase(), now = new Date().toISOString();
-  const { data: sessions, error } = await db.from('wifi_sessions').select('id,session_status').in('session_status', ['ACTIVE','WAITING_GATEWAY']).lte('expiry_time', now);
+  // A queued MikroTik grant has not delivered paid access yet. Its clock
+  // starts when the agent confirms authorization, not at payment time.
+  const expirableStatuses = isMikrotikAgentMode() ? ['ACTIVE'] : ['ACTIVE','WAITING_GATEWAY'];
+  const { data: sessions, error } = await db.from('wifi_sessions').select('id,session_status').in('session_status', expirableStatuses).lte('expiry_time', now);
   if (error) return res.status(500).json({ error: error.message });
   if (isTyraxAgentMode()) {
     for (const session of sessions) {
@@ -30,15 +33,15 @@ export default async function handler(req, res) {
       await db.from('mikrotik_router_commands').update({ status: 'CANCELLED', last_error: 'Session expired before device authorization' }).eq('session_id', session.id).eq('action', 'ALLOW').eq('status', 'PENDING');
       await db.from('wifi_sessions').update({ session_status: 'EXPIRED' }).eq('id', session.id).in('session_status', ['ACTIVE','WAITING_GATEWAY']);
     }
-    const { data: stuck } = await db.from('wifi_sessions').select('id,payment_id').eq('session_status', 'GATEWAY_FAILED').gt('expiry_time', now).limit(50);
+    const { data: stuck } = await db.from('wifi_sessions').select('id,payment_id').eq('session_status', 'GATEWAY_FAILED').limit(50);
     let retried = 0;
     for (const session of stuck || []) {
       const { data: payment } = await db.from('payments').select('mikrotik_portal_context_id,wifi_packages(duration_minutes)').eq('id', session.payment_id).maybeSingle();
       const { data: context } = await db.from('mikrotik_portal_contexts').select('gateway_id,mac_address,client_ip').eq('id', payment?.mikrotik_portal_context_id).maybeSingle();
       if (!payment || !context) continue;
       try {
-        await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' }).eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
         await queueMikrotikRouterCommand({ sessionId: session.id, gatewayId: context.gateway_id, macAddress: context.mac_address, clientIp: context.client_ip, action: 'ALLOW', durationMinutes: payment.wifi_packages.duration_minutes });
+        await db.from('wifi_sessions').update({ session_status: 'WAITING_GATEWAY' }).eq('id', session.id).eq('session_status', 'GATEWAY_FAILED');
         retried++;
       } catch { /* retry on the next scheduled run */ }
     }

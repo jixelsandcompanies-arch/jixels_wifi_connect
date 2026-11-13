@@ -25,7 +25,7 @@ The Network Settings screenshot confirms the router's LAN admin address is `192.
 
 This is the supported path if you buy/use a MikroTik: Airtel LAN connects to the MikroTik WAN; the Tenda runs in AP/bridge mode with its DHCP server disabled and connects to a guest-side MikroTik LAN/bridge; guests join the Tenda's Barrio- HOTSPOT SSID. Airtel Wi-Fi must stay private for staff. Guest traffic must pass through the MikroTik HotSpot.
 
-The MikroTik portal login page is provided in `mikrotik/hotspot/login.html`. Upload it as the HotSpot `login.html` file. It forwards RouterOS's `$(mac)` and `$(ip)` values to the Vercel portal; checkout never asks the customer to type a MAC. Add `jixels-wifi-connect.vercel.app` to the MikroTik HotSpot walled garden so the portal can load before authentication. Keep RouterOS management reachable only on the trusted LAN. Use RouterOS v7 REST over trusted HTTPS if available; if using HTTP, isolate it to the wired/trusted LAN and restrict it to the agent PC's IP.
+The MikroTik portal login page is provided in `mikrotik/hotspot/login.html`. Upload it as the HotSpot `login.html` file. It forwards RouterOS's `$(mac)` and `$(ip)` values to the Vercel portal; checkout never asks the customer to type a MAC. Add `jixels-wifi-connect.vercel.app` to the MikroTik HotSpot walled garden so the portal can load before authentication. After payment, the local agent creates a session-scoped, MAC-only `bypassed` IP binding, so the device does not need to submit a second HotSpot login form. Keep RouterOS management reachable only on the trusted LAN. Use RouterOS v7 REST over trusted HTTPS if available; if using HTTP, isolate it to the wired/trusted LAN and restrict it to the agent PC's IP.
 
 In Vercel set:
 
@@ -34,7 +34,7 @@ In Vercel set:
 * `MIKROTIK_AGENT_TOKEN` to a random 32-byte token
 * The CloudPay values listed above, including the signed callback at `https://jixels-wifi-connect.vercel.app/api/cloudpay/webhook`
 
-Run migration `007_mikrotik_gateway.sql` after `001` through `006`. On the always-on Windows PC connected to the MikroTik's trusted LAN, run PowerShell from this repository:
+Run migration `007_mikrotik_gateway.sql` after `001` through `006`. On the always-on Windows PC connected to the MikroTik's trusted LAN, first open PowerShell in the repository folder (the folder containing `tools` and `package.json`), then run:
 
 ```powershell
 $b = New-Object byte[] 32
@@ -48,7 +48,7 @@ Set-Clipboard $AgentToken
 
 The scheduled task starts the agent hidden at Windows sign-in and restarts it after a process failure. Keep the PC powered on, signed in, and connected to the MikroTik LAN. The agent writes redacted operational diagnostics to `%LOCALAPPDATA%\JixelsMikrotikAgent\agent.log`.
 
-Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and allow it to read hotspot hosts/active entries and manage active entries and IP bindings. After payment, the agent verifies the checkout IP and MAC against the live HotSpot host, creates a session-scoped `bypassed` IP binding, then reads it back before acknowledging the grant. Keep the agent PC powered on and connected to the MikroTik. The every-minute expiry job asks the agent to remove that exact binding at the paid wall-clock expiry. The app polls the agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
+Use your MikroTik's actual address in both places. The setup script stores the RouterOS API credential encrypted for that Windows account. Create a dedicated RouterOS API account for the agent, enable REST (`www` or `www-ssl`), and allow it to read HotSpot IP bindings and create, update, and remove those bindings. The agent uses the device MAC from captive-portal checkout to create and verify a session-scoped bypass binding; it does not need to read the full HotSpot host or active-session tables to grant access. Keep the agent PC powered on and connected to the MikroTik. Paid time starts when the agent confirms the router grant, and queued grants are not expired against the original payment timestamp. The every-minute expiry job asks the agent to remove that exact binding when paid time ends. The app polls the agent through HTTPS; Vercel never connects to the private router address. Configure CloudPay and the MikroTik mode in Vercel, then redeploy after applying migration `007`.
 
 After editing `tools/mikrotik-agent.ps1`, rerun `tools/install-mikrotik-agent-task.ps1` from this checkout on the agent PC to restart the scheduled agent with the updated script. If the portal shows that the grant was applied but guests still have no internet, verify their traffic reaches the MikroTik HotSpot, the Tenda is in AP/bridge mode behind it, and the MikroTik WAN has working internet. A bypass binding authorizes HotSpot traffic; it cannot repair an upstream internet or Wi-Fi bridge problem.
 
