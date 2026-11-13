@@ -8,6 +8,18 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 $agentScript = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'mikrotik-agent.ps1')).Path
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $taskName = 'Jixels MikroTik Agent'
+$existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($existingTask -and $existingTask.State -eq 'Running') {
+  Stop-ScheduledTask -TaskName $taskName
+  for ($attempt = 0; $attempt -lt 10; $attempt++) {
+    Start-Sleep -Seconds 1
+    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if (-not $existingTask -or $existingTask.State -ne 'Running') { break }
+  }
+  if ($existingTask -and $existingTask.State -eq 'Running') {
+    throw "Could not stop the existing '$taskName' task. Stop its running PowerShell window, then rerun this installer."
+  }
+}
 $powershell = Join-Path $PSHOME 'powershell.exe'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$agentScript`""
 $action = New-ScheduledTaskAction -Execute $powershell -Argument $arguments -WorkingDirectory $PSScriptRoot

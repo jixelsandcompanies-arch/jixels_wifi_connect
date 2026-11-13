@@ -27,6 +27,12 @@ function Write-AgentLog {
   if ($Level -eq 'WARN' -or $Level -eq 'ERROR') { Write-Warning $line } else { Write-Host $line }
 }
 
+$agentMutex = [System.Threading.Mutex]::new($false, 'Local\JixelsMikrotikAgent')
+$ownsAgentMutex = $false
+try { $ownsAgentMutex = $agentMutex.WaitOne(0) }
+catch [System.Threading.AbandonedMutexException] { $ownsAgentMutex = $true }
+if (-not $ownsAgentMutex) { exit 0 }
+
 function Invoke-RouterRest {
   param([string]$Path, [string]$Method = 'Get', $Body = $null)
   $params = @{ Uri = "$routerRoot/$Path"; Method = $Method; Headers = $routerHeaders; TimeoutSec = 12 }
@@ -57,25 +63,12 @@ function Invoke-RouterRest {
 function Normalize-Mac([string]$Mac) { $Mac.Trim().ToLowerInvariant() }
 function Get-RouterItems {
   param([string]$Path, [hashtable]$Filters, [string[]]$Properties)
-  # RouterOS rejects query-string filters for some HotSpot menus on this
-  # gateway. Read the menu, then match fields locally so a bad filter cannot
-  # block paid grants or session cleanup.
-  $items = @(Invoke-RouterRest -Path $Path)
-  foreach ($item in $items) {
-    $matches = $true
-    foreach ($key in $Filters.Keys) {
-      $property = $item.PSObject.Properties[$key]
-      if ($null -eq $property) {
-        $matches = $false
-        break
-      }
-      $actual = [string]$property.Value
-      $expected = [string]$Filters[$key]
-      if ($key -eq 'mac-address') { $actual = $actual.ToLowerInvariant(); $expected = $expected.ToLowerInvariant() }
-      if ($actual -ne $expected) { $matches = $false; break }
-    }
-    if ($matches) { $item }
-  }
+  # Use RouterOS's print command with a .query and .proplist body so the
+  # router returns only the matching device rows, never the full HotSpot menu.
+  $query = @($Filters.Keys | ForEach-Object { "${_}=$($Filters[$_])" })
+  $properties = @('.id') + @($Properties | Where-Object { $_ -ne '.id' })
+  $body = @{ '.query' = $query; '.proplist' = $properties }
+  return @(Invoke-RouterRest -Path "$Path/print" -Method Post -Body $body)
 }
 
 function Apply-Command($Command) {
