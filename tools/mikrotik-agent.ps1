@@ -119,26 +119,14 @@ function Apply-Command($Command) {
     # an otherwise valid bypass and leave the device online past expiry.
     $script:CurrentOperation = 'find paid-device bypass binding to remove'
     $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ comment = $bindingComment } -Properties @('.id','mac-address','address','type','comment'))
-    foreach ($binding in ($bindings | Where-Object { $_.comment -eq $bindingComment })) {
-      $script:CurrentOperation = 'remove expired paid-device bypass binding'
+    foreach ($binding in ($bindings | Where-Object { $_.comment -eq $bindingComment -and (Normalize-Mac $_.'mac-address') -eq $mac })) {
+      # Keep the device explicitly blocked after expiry. Deleting the bypass
+      # may leave existing connections usable, and RouterOS's HotSpot host
+      # table is read-only. A later paid ALLOW reuses this Jixels binding and
+      # changes its type back to bypassed.
+      $script:CurrentOperation = 'block expired paid-device binding'
       $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
-      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
-    }
-
-    # Removing an IP binding alone can leave an already-connected HotSpot
-    # host using its cached bypass state. Evict that host when no other
-    # binding for the MAC remains, so the expired device must reauthorize.
-    $script:CurrentOperation = 'check for another paid-device binding before disconnect'
-    $remainingBindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','comment'))
-    $remainingBindings = @($remainingBindings | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac })
-    if ($remainingBindings.Count -eq 0) {
-      $script:CurrentOperation = 'find expired device in HotSpot host table'
-      $hosts = @(Get-RouterItems -Path 'ip/hotspot/host' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address'))
-      foreach ($hostEntry in ($hosts | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac })) {
-        $script:CurrentOperation = 'disconnect expired device from HotSpot'
-        $encodedId = [Uri]::EscapeDataString([string]$hostEntry.'.id')
-        Invoke-RouterRest -Path "ip/hotspot/host/$encodedId" -Method Delete | Out-Null
-      }
+      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Patch -Body @{ type = 'blocked' } | Out-Null
     }
 
     # Also clean up entries created by the previous credential-based agent.
