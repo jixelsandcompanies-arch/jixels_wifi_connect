@@ -183,7 +183,32 @@ function Apply-Command($Command) {
   } else { throw "Unsupported router action: $($Command.action)" }
 }
 
+function Remove-OrphanedJixelsBindings($AuthorizedBindings) {
+  $authorized = @{}
+  foreach ($item in $AuthorizedBindings) {
+    $key = "$(Normalize-Mac ([string]$item.mac_address))|Jixels session $($item.session_id)"
+    $authorized[$key] = $true
+  }
+  $script:CurrentOperation = 'find expired or orphaned Jixels bypass bindings'
+  $bypassed = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ type = 'bypassed' } -Properties @('.id','mac-address','type','comment'))
+  foreach ($binding in $bypassed) {
+    $comment = [string]$binding.comment
+    if ($binding.type -ne 'bypassed' -or -not $comment.StartsWith('Jixels session ', [StringComparison]::Ordinal)) { continue }
+    $mac = Normalize-Mac ([string]$binding.'mac-address')
+    if ($authorized.ContainsKey("$mac|$comment")) { continue }
+
+    # Reconcile by MAC and session against the backend's still-valid paid
+    # sessions. This catches stale bypasses whose original BLOCK command was
+    # already acknowledged or matched a different session comment.
+    $script:CurrentOperation = 'remove expired or orphaned Jixels bypass binding'
+    $encodedId = Get-RouterItemPathId ([string]$binding.'.id')
+    Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
+    Write-AgentLog 'WARN' "Removed an expired or orphaned Jixels bypass for $mac ($comment)."
+  }
+}
+
 Write-AgentLog 'INFO' 'Jixels MikroTik agent started.'
+$script:LastBindingReconcileAt = [DateTime]::MinValue
 try {
   # Older builds briefly marked expired Jixels rules as blocked, which also
   # stopped customers from reaching the captive billing page. Remove only
@@ -206,7 +231,13 @@ try {
 }
 while ($true) {
   try {
-    $feed = Invoke-RestMethod -Uri $config.apiUrl -Method Get -Headers $agentHeaders -TimeoutSec 15
+    $reconcileDue = ((Get-Date) - $script:LastBindingReconcileAt).TotalSeconds -ge 60
+    $pollUri = [string]$config.apiUrl
+    if ($reconcileDue) {
+      $separator = if ($pollUri.Contains('?')) { '&' } else { '?' }
+      $pollUri = "$pollUri${separator}reconcile=1"
+    }
+    $feed = Invoke-RestMethod -Uri $pollUri -Method Get -Headers $agentHeaders -TimeoutSec 15
     foreach ($command in $feed.commands) {
       try {
         $script:CurrentOperation = 'apply router command'
@@ -219,6 +250,14 @@ while ($true) {
         $ack = @{ commandId = $command.id; ok = $false; message = $failure } | ConvertTo-Json -Compress
         try { Invoke-RestMethod -Uri $config.apiUrl -Method Post -Headers $agentHeaders -ContentType 'application/json' -Body $ack -TimeoutSec 15 | Out-Null } catch { }
         Write-AgentLog 'ERROR' "Command $($command.id) failed during '$script:CurrentOperation' and will retry: $($_.Exception.Message)"
+      }
+    }
+    if ($feed.PSObject.Properties.Name -contains 'authorizedBindings') {
+      try {
+        Remove-OrphanedJixelsBindings @($feed.authorizedBindings)
+        $script:LastBindingReconcileAt = Get-Date
+      } catch {
+        Write-AgentLog 'ERROR' "Jixels expiry reconciliation failed during '$script:CurrentOperation': $($_.Exception.Message)"
       }
     }
   } catch {

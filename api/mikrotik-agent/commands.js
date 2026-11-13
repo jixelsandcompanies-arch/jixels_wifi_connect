@@ -40,9 +40,60 @@ export default async function handler(req, res) {
       grants = data || [];
     }
     const commands = (cleanup || []).concat(grants);
-    console.info('MikroTik agent poll completed', { gatewayId, pendingGrants: grants.length, pendingCleanup: (cleanup || []).length });
+    let authorizedBindings;
+    if (req.query?.reconcile === '1') {
+      // Supply the paid sessions that may still own a bypass. The local agent
+      // uses this snapshot to remove orphaned Jixels bypasses, including rows
+      // left behind by older BLOCK commands that only matched one session ID.
+      const sessions = [];
+      for (let offset = 0; ; offset += 1000) {
+        const { data, error: sessionError } = await db.from('wifi_sessions')
+          .select('id,payment_id')
+          .in('session_status', ['ACTIVE', 'WAITING_GATEWAY'])
+          .gt('expiry_time', now).order('id').range(offset, offset + 999);
+        if (sessionError) {
+          console.error('MikroTik authorized session lookup failed', { code: sessionError.code, message: sessionError.message, gatewayId });
+          return res.status(500).json({ error: 'Could not load authorized MikroTik sessions' });
+        }
+        sessions.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+      const paymentIds = [...new Set((sessions || []).map(session => session.payment_id).filter(Boolean))];
+      let paymentContexts = [];
+      for (let offset = 0; offset < paymentIds.length; offset += 200) {
+        const { data, error: paymentError } = await db.from('payments').select('id,mikrotik_portal_context_id')
+          .in('id', paymentIds.slice(offset, offset + 200)).eq('status', 'SUCCESS');
+        if (paymentError) {
+          console.error('MikroTik payment lookup failed', { code: paymentError.code, message: paymentError.message, gatewayId });
+          return res.status(500).json({ error: 'Could not load authorized MikroTik payments' });
+        }
+        paymentContexts.push(...(data || []));
+      }
+      const contextIds = [...new Set(paymentContexts.map(payment => payment.mikrotik_portal_context_id).filter(Boolean))];
+      authorizedBindings = [];
+      const contexts = [];
+      for (let offset = 0; offset < contextIds.length; offset += 200) {
+        const { data, error: contextError } = await db.from('mikrotik_portal_contexts')
+          .select('id,gateway_id,mac_address').in('id', contextIds.slice(offset, offset + 200)).eq('gateway_id', gatewayId);
+        if (contextError) {
+          console.error('MikroTik portal context lookup failed', { code: contextError.code, message: contextError.message, gatewayId });
+          return res.status(500).json({ error: 'Could not load authorized MikroTik devices' });
+        }
+        contexts.push(...(data || []));
+      }
+      if (contextIds.length) {
+        const sessionsByPayment = new Map((sessions || []).map(session => [session.payment_id, session.id]));
+        const contextsById = new Map(contexts.map(context => [context.id, context]));
+        authorizedBindings = paymentContexts.map(payment => {
+          const context = contextsById.get(payment.mikrotik_portal_context_id);
+          const sessionId = sessionsByPayment.get(payment.id);
+          return context && sessionId ? { mac_address: context.mac_address, session_id: sessionId } : null;
+        }).filter(Boolean);
+      }
+    }
+    console.info('MikroTik agent poll completed', { gatewayId, pendingGrants: grants.length, pendingCleanup: (cleanup || []).length, reconciling: req.query?.reconcile === '1' });
     res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).json({ commands });
+    return res.status(200).json({ commands, ...(authorizedBindings ? { authorizedBindings } : {}) });
   }
   if (req.method === 'POST') {
     const { type, routerOnline, commandId, ok, permanent = false, message = '' } = req.body || {};
