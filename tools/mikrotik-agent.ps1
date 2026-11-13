@@ -76,39 +76,14 @@ function Apply-Command($Command) {
 
   if ($Command.action -eq 'ALLOW') {
     # The captive portal context binds this paid command to the device MAC.
-    # Avoid reading the entire HotSpot host/active tables: those REST calls
-    # can time out and prevent a paid grant from being applied. A MAC-only
-    # bypass also remains valid if the device reconnects with a new IP.
-    $script:CurrentOperation = 'find existing Jixels paid-device binding'
-    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
+    # Avoid HotSpot table reads in the grant path: they can time out and
+    # prevent a paid grant from being applied. RouterOS's successful PUT
+    # response confirms that the MAC-only bypass was created; the binding
+    # remains valid if the device reconnects with a new IP.
     $bindingComment = "Jixels session $($Command.session_id)"
-    $ownedBindings = @($bindings | Where-Object { $_.comment -eq $bindingComment })
-    $manualBindings = @($bindings | Where-Object {
-      -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) -and
-      (Normalize-Mac $_.'mac-address') -eq $mac
-    })
-    if ($manualBindings.Count -gt 0) { throw 'A manually managed HotSpot IP binding matches this device. Ask the Wi-Fi administrator to review it.' }
-
     $newBinding = @{ 'mac-address' = $mac; type = 'bypassed'; comment = $bindingComment }
-    # Keep the bypass tied to the paid MAC even when its IP changes. Delete
-    # any stale session entry first so no old address restriction survives.
-    foreach ($ownedBinding in $ownedBindings) {
-      $encodedId = [Uri]::EscapeDataString([string]$ownedBinding.'.id')
-      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
-    }
     $script:CurrentOperation = 'create paid-device bypass binding'
     Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
-
-    # Do not acknowledge until RouterOS returns the persisted MAC-only
-    # binding with the expected session comment and bypass type.
-    $script:CurrentOperation = 'verify paid-device bypass binding'
-    $verifiedBindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
-    $verifiedBinding = $verifiedBindings | Where-Object {
-      (Normalize-Mac $_.'mac-address') -eq $mac -and
-      $_.type -eq 'bypassed' -and
-      $_.comment -eq $bindingComment
-    } | Select-Object -First 1
-    if (-not $verifiedBinding) { throw 'RouterOS did not confirm the paid-device bypass binding. The grant remains queued for retry.' }
   } elseif ($Command.action -eq 'BLOCK') {
     $script:CurrentOperation = 'find paid-device bypass binding to remove'
     $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
