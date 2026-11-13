@@ -4,9 +4,11 @@ import { isMikrotikAgentMode, isTyraxAgentMode, queueMikrotikRouterCommand, queu
 export default async function handler(req, res) {
   if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).end();
   const db = supabase(), now = new Date().toISOString();
-  // A queued MikroTik grant has not delivered paid access yet. Its clock
-  // starts when the agent confirms authorization, not at payment time.
-  const expirableStatuses = isMikrotikAgentMode() ? ['ACTIVE'] : ['ACTIVE','WAITING_GATEWAY'];
+  // Successful MikroTik grants reset expiry_time when the router acknowledges
+  // ALLOW. If a grant is still WAITING_GATEWAY at its stored expiry, cancel it
+  // and queue BLOCK as a failsafe against a router write that succeeded while
+  // its acknowledgement was lost.
+  const expirableStatuses = ['ACTIVE','WAITING_GATEWAY'];
   const { data: sessions, error } = await db.from('wifi_sessions').select('id,session_status').in('session_status', expirableStatuses).lte('expiry_time', now);
   if (error) return res.status(500).json({ error: error.message });
   if (isTyraxAgentMode()) {
