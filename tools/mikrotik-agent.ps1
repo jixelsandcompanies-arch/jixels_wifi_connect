@@ -120,13 +120,13 @@ function Apply-Command($Command) {
     $script:CurrentOperation = 'find paid-device bypass binding to remove'
     $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ comment = $bindingComment } -Properties @('.id','mac-address','address','type','comment'))
     foreach ($binding in ($bindings | Where-Object { $_.comment -eq $bindingComment -and (Normalize-Mac $_.'mac-address') -eq $mac })) {
-      # Keep the device explicitly blocked after expiry. Deleting the bypass
-      # may leave existing connections usable, and RouterOS's HotSpot host
-      # table is read-only. A later paid ALLOW reuses this Jixels binding and
-      # changes its type back to bypassed.
-      $script:CurrentOperation = 'block expired paid-device binding'
+      # Remove only this session's bypass rule. This returns the device to
+      # normal HotSpot authentication so its next request reaches the billing
+      # portal. The HotSpot host table itself is read-only and must not be
+      # deleted from.
+      $script:CurrentOperation = 'remove expired paid-device bypass binding'
       $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
-      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Patch -Body @{ type = 'blocked' } | Out-Null
+      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
     }
 
     # Also clean up entries created by the previous credential-based agent.
@@ -149,6 +149,26 @@ function Apply-Command($Command) {
 }
 
 Write-AgentLog 'INFO' 'Jixels MikroTik agent started.'
+try {
+  # Older builds briefly marked expired Jixels rules as blocked, which also
+  # stopped customers from reaching the captive billing page. Remove only
+  # those Jixels-owned blocked rules during upgrade; leave manual router rules
+  # untouched so clients return to normal HotSpot login.
+  $script:CurrentOperation = 'find stale Jixels blocked bindings'
+  $staleBlockedBindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ type = 'blocked' } -Properties @('.id','type','comment'))
+  foreach ($binding in ($staleBlockedBindings | Where-Object { $_.type -eq 'blocked' -and ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })) {
+    try {
+      $script:CurrentOperation = 'remove stale Jixels blocked binding'
+      $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
+      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
+      Write-AgentLog 'WARN' "Removed a stale Jixels blocked binding $($binding.'.id'); the device can return to the billing portal."
+    } catch {
+      Write-AgentLog 'ERROR' "Could not remove stale Jixels blocked binding $($binding.'.id'): $($_.Exception.Message)"
+    }
+  }
+} catch {
+  Write-AgentLog 'ERROR' "Startup cleanup for stale Jixels blocked bindings failed: $($_.Exception.Message)"
+}
 while ($true) {
   try {
     $feed = Invoke-RestMethod -Uri $config.apiUrl -Method Get -Headers $agentHeaders -TimeoutSec 15
