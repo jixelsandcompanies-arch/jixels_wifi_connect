@@ -65,7 +65,18 @@ function Get-RouterItems {
   param([string]$Path, [hashtable]$Filters, [string[]]$Properties)
   # Use RouterOS's print command with a .query and .proplist body so the
   # router returns only the matching device rows, never the full HotSpot menu.
-  $query = @($Filters.Keys | ForEach-Object { "${_}=$($Filters[$_])" })
+  $query = @(
+    foreach ($key in $Filters.Keys) {
+      if ($key -eq 'mac-address') {
+        $macValue = Normalize-Mac ([string]$Filters[$key])
+        "mac-address=$macValue"
+        "mac-address=$($macValue.ToUpperInvariant())"
+        '#|'
+      } else {
+        "${key}=$($Filters[$key])"
+      }
+    }
+  )
   $properties = @('.id') + @($Properties | Where-Object { $_ -ne '.id' })
   $body = @{ '.query' = $query; '.proplist' = $properties }
   return @(Invoke-RouterRest -Path "$Path/print" -Method Post -Body $body)
@@ -76,14 +87,31 @@ function Apply-Command($Command) {
 
   if ($Command.action -eq 'ALLOW') {
     # The captive portal context binds this paid command to the device MAC.
-    # Avoid HotSpot table reads in the grant path: they can time out and
-    # prevent a paid grant from being applied. RouterOS's successful PUT
-    # response confirms that the MAC-only bypass was created; the binding
-    # remains valid if the device reconnects with a new IP.
+    # RouterOS allows only one IP binding per client, so reuse a Jixels-owned
+    # binding for renewals/retries instead of trying to add a duplicate.
     $bindingComment = "Jixels session $($Command.session_id)"
     $newBinding = @{ 'mac-address' = $mac; type = 'bypassed'; comment = $bindingComment }
-    $script:CurrentOperation = 'create paid-device bypass binding'
-    Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
+    $script:CurrentOperation = 'find existing paid-device binding'
+    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
+    $matchingBindings = @($bindings | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac })
+    $ownedBindings = @($matchingBindings | Where-Object { ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
+    $manualBindings = @($matchingBindings | Where-Object { -not ([string]$_.comment).StartsWith('Jixels session ', [StringComparison]::Ordinal) })
+    if ($manualBindings.Count -gt 0) { throw 'A manually managed HotSpot binding already exists for this device. It was left unchanged; ask the Wi-Fi administrator to review it.' }
+
+    if ($ownedBindings.Count -gt 0) {
+      $targetBinding = $ownedBindings[0]
+      $encodedId = [Uri]::EscapeDataString([string]$targetBinding.'.id')
+      $script:CurrentOperation = 'update existing paid-device bypass binding'
+      Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Patch -Body $newBinding | Out-Null
+      foreach ($duplicate in @($ownedBindings | Select-Object -Skip 1)) {
+        $script:CurrentOperation = 'remove duplicate paid-device bypass binding'
+        $duplicateId = [Uri]::EscapeDataString([string]$duplicate.'.id')
+        Invoke-RouterRest -Path "ip/hotspot/ip-binding/$duplicateId" -Method Delete | Out-Null
+      }
+    } else {
+      $script:CurrentOperation = 'create paid-device bypass binding'
+      Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
+    }
   } elseif ($Command.action -eq 'BLOCK') {
     $bindingComment = "Jixels session $($Command.session_id)"
     # Locate this session's binding by its unique comment. RouterOS may
