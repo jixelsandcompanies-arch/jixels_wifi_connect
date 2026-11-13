@@ -31,7 +31,9 @@ export default async function handler(req, res) {
       if (!payment || !context) continue;
       await queueMikrotikRouterCommand({ sessionId: session.id, gatewayId: context.gateway_id, macAddress: context.mac_address, clientIp: context.client_ip, action: 'BLOCK', durationMinutes: payment.wifi_packages?.duration_minutes || 1 });
       await db.from('mikrotik_router_commands').update({ status: 'CANCELLED', last_error: 'Session expired before device authorization' }).eq('session_id', session.id).eq('action', 'ALLOW').eq('status', 'PENDING');
-      await db.from('wifi_sessions').update({ session_status: 'EXPIRED' }).eq('id', session.id).in('session_status', ['ACTIVE','WAITING_GATEWAY']);
+      // Keep the session ACTIVE until the agent confirms that the router has
+      // removed the bypass. The BLOCK acknowledgement marks it EXPIRED via
+      // complete_mikrotik_router_command; a queued command is not revocation.
     }
     const { data: stuck } = await db.from('wifi_sessions').select('id,payment_id').eq('session_status', 'GATEWAY_FAILED').limit(50);
     let retried = 0;

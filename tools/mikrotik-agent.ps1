@@ -85,9 +85,12 @@ function Apply-Command($Command) {
     $script:CurrentOperation = 'create paid-device bypass binding'
     Invoke-RouterRest -Path 'ip/hotspot/ip-binding' -Method Put -Body $newBinding | Out-Null
   } elseif ($Command.action -eq 'BLOCK') {
-    $script:CurrentOperation = 'find paid-device bypass binding to remove'
-    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','address','type','comment'))
     $bindingComment = "Jixels session $($Command.session_id)"
+    # Locate this session's binding by its unique comment. RouterOS may
+    # normalize MAC address casing, so filtering by the original MAC can miss
+    # an otherwise valid bypass and leave the device online past expiry.
+    $script:CurrentOperation = 'find paid-device bypass binding to remove'
+    $bindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ comment = $bindingComment } -Properties @('.id','mac-address','address','type','comment'))
     foreach ($binding in ($bindings | Where-Object { $_.comment -eq $bindingComment })) {
       $script:CurrentOperation = 'remove expired paid-device bypass binding'
       $encodedId = [Uri]::EscapeDataString([string]$binding.'.id')
