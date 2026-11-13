@@ -94,3 +94,45 @@ test('Already paid verifies the receipt once and polls status until access is ac
   assert.equal(elements.get('#connectionNotice').hidden, false);
   assert.equal(modal.closed, true);
 });
+
+test('Pay keeps polling while the MikroTik grant is waiting, then confirms access', async () => {
+  const source = await readFile(new URL('../app.js', import.meta.url), 'utf8');
+  const listeners = new Map();
+  const makeElement = id => ({ id, textContent: '', value: '', hidden: true, disabled: false, attributes: {}, classList: { toggle() {} }, setAttribute(name, value) { this.attributes[name] = value; }, addEventListener(name, callback) { listeners.set(this.id || name, callback); }, focus() {}, scrollIntoView() {} });
+  const cards = [];
+  const grid = { replaceChildren() { cards.length = 0; }, append(card) { cards.push(card); }, scrollIntoView() {}, innerHTML: '' };
+  const modal = { showModal() {}, close() { this.closed = true; } };
+  const elements = new Map([
+    ['#planGrid', grid], ['#purchaseModal', modal], ['#modalName', makeElement('modalName')],
+    ['#modalPrice', makeElement('modalPrice')], ['#modalDescription', makeElement('modalDescription')],
+    ['#modalPhone', makeElement('modalPhone')], ['#modalPay', makeElement('modalPay')],
+    ['#modalStatus', makeElement('modalStatus')], ['#modalStatusText', makeElement('modalStatusText')],
+    ['#paymentForm', makeElement('paymentForm')], ['#connectionNotice', makeElement('connectionNotice')],
+    ['.close', makeElement('close')]
+  ]);
+  let statusChecks = 0;
+  const fetch = async url => {
+    if (url === '/api/packages') return { ok: true, json: async () => [{ id: 'pkg-1', name: '1 Hour', price_kes: 10, duration_minutes: 60 }] };
+    if (url === '/api/mikrotik/context') return { ok: true, json: async () => ({ portalToken: 'a'.repeat(64) }) };
+    if (url === '/api/pay') return { ok: true, status: 202, json: async () => ({ success: true, checkoutRequestId: 'cloud-ref-1', statusToken: 'b'.repeat(64) }) };
+    if (String(url).startsWith('/api/payments/status')) {
+      statusChecks++;
+      return { ok: true, json: async () => statusChecks === 1
+        ? ({ status: 'SUCCESS', session: 'WAITING_GATEWAY' })
+        : ({ status: 'SUCCESS', session: 'ACTIVE' }) };
+    }
+    throw new Error(`Unexpected request ${url}`);
+  };
+  runInNewContext(source, {
+    document: { querySelector(selector) { return elements.get(selector) || null; }, querySelectorAll(selector) { return selector === '.plan' ? cards : []; }, createElement() { return { dataset: {}, classList: { toggle() {} }, querySelector: () => makeElement('buyButton') }; } },
+    fetch, location: { search: '?gateway=mikrotik&clientmac=aa:bb:cc:dd:ee:ff&clientip=192.0.2.1', origin: 'https://example.test', pathname: '/' },
+    history: { replaceState() {} }, URLSearchParams, Date, setTimeout: (fn, delay) => setTimeout(fn, delay === 3000 || delay === 1000 ? 0 : delay), clearTimeout, AbortController, encodeURIComponent, console
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  cards[0].onclick();
+  elements.get('#modalPhone').value = '0115613332';
+  await listeners.get('paymentForm')({ preventDefault() {} });
+  assert.equal(statusChecks, 2);
+  assert.equal(elements.get('#connectionNotice').hidden, false);
+  assert.equal(modal.closed, true);
+});

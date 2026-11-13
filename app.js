@@ -114,7 +114,9 @@ async function restorePaidAccess() {
 
     const statusToken = String(result.statusToken || '');
     if (!/^[a-f0-9]{64}$/.test(statusToken)) throw new Error('Payment verified, but the hotspot status check could not start. Try again shortly.');
-    const deadline = Date.now() + 12000;
+    // RouterOS REST calls in the local agent can each take up to 12 seconds.
+    // Keep checking long enough for the agent to create and verify the grant.
+    const deadline = Date.now() + 60000;
     let lastError = '';
     let attempt = 0;
     while (Date.now() < deadline) {
@@ -254,7 +256,7 @@ const handlePaymentSubmit = async event => {
     payButton.textContent = 'Payment in progress';
     console.log('STK sent', result.checkoutRequestId);
     setPaymentStatus('Check your phone for STK Push - Enter PIN', true);
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + 60_000;
     let paymentConfirmed = false;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 3000));
@@ -277,11 +279,9 @@ const handlePaymentSubmit = async event => {
         break;
       }
       if (state.status === 'SUCCESS' && ['GATEWAY_FAILED', 'WAITING_GATEWAY'].includes(state.session)) {
-        paymentState = 'pending';
         payButton.textContent = 'Payment received';
-        setPaymentStatus('Payment is confirmed, but hotspot authorization is still pending. Do not pay again; use “Already paid? Restore access” to retry.', false);
-        paymentState = 'activation_pending';
-        break;
+        setPaymentStatus('Payment is confirmed. The hotspot is still applying access; do not pay again.', true);
+        continue;
       }
       if (state.status === 'SUCCESS') setPaymentStatus('Payment is confirmed. The hotspot is applying access now...', true);
     }
