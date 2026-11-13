@@ -114,11 +114,14 @@ function statusClass(status) {
 }
 
 function renderSessions(sessions) {
-  $('#sessions').innerHTML = sessions.length ? sessions.map(session => `<tr>
-    <td>${escapeHtml(session.phone)}</td><td>${escapeHtml(session.wifi_packages?.name || 'Package unavailable')}</td>
-    <td>${escapeHtml(kenyaTime(session.start_time))}</td><td>${escapeHtml(kenyaTime(session.expiry_time))}</td>
-    <td><span class="status-pill ${statusClass(session.session_status)}">${escapeHtml(String(session.session_status || 'Unknown').replaceAll('_', ' '))}</span></td>
-  </tr>`).join('') : '<tr><td colspan="5" class="table-message">No customer sessions recorded yet.</td></tr>';
+  $('#sessions').innerHTML = sessions.length ? sessions.map(session => {
+    const waiting = ['WAITING_GATEWAY', 'GATEWAY_FAILED'].includes(session.session_status);
+    return `<tr>
+      <td>${escapeHtml(session.phone)}</td><td>${escapeHtml(session.wifi_packages?.name || 'Package unavailable')}</td>
+      <td>${escapeHtml(waiting ? 'Pending activation' : kenyaTime(session.start_time))}</td><td>${escapeHtml(waiting ? 'Pending activation' : kenyaTime(session.expiry_time))}</td>
+      <td><span class="status-pill ${statusClass(session.session_status)}">${escapeHtml(String(session.session_status || 'Unknown').replaceAll('_', ' '))}</span></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="5" class="table-message">No customer sessions recorded yet.</td></tr>';
 }
 
 function renderRevenue(revenue) {
@@ -134,11 +137,12 @@ function renderPayments(payments) {
     const session = Array.isArray(payment.wifi_sessions) ? payment.wifi_sessions[0] : payment.wifi_sessions;
     const state = session?.session_status || 'NOT PREPARED';
     const recoverable = !session || ['GATEWAY_FAILED', 'WAITING_GATEWAY'].includes(state);
+    const expiry = ['GATEWAY_FAILED', 'WAITING_GATEWAY'].includes(state) ? 'Pending activation' : kenyaTime(session?.expiry_time);
     return `<tr><td>${escapeHtml(payment.phone || '--')}</td><td>${escapeHtml(payment.wifi_packages?.name || 'Package unavailable')}</td>
-      <td>${fmt(payment.amount_kes)}<small>${escapeHtml(kenyaTime(payment.created_at))}</small></td><td>${escapeHtml(payment.mpesa_receipt_number || 'Pending receipt')}</td>
+      <td>${fmt(payment.amount_kes)}<small>${escapeHtml(kenyaTime(payment.created_at))}</small></td><td>${escapeHtml(expiry)}</td><td>${escapeHtml(payment.mpesa_receipt_number || 'Pending receipt')}</td>
       <td><span class="status-pill ${statusClass(state)}">${escapeHtml(String(state).replaceAll('_', ' '))}</span></td>
       <td><button class="action-button" type="button" data-payment-recover="${escapeHtml(payment.id)}" ${recoverable ? '' : 'disabled'}>Already paid</button></td></tr>`;
-  }).join('') : '<tr><td colspan="6" class="table-message">No confirmed payments yet.</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="table-message">No confirmed payments yet.</td></tr>';
 }
 
 async function recoverPayment(paymentId, button) {
