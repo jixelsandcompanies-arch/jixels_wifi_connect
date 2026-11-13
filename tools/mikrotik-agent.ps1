@@ -125,6 +125,22 @@ function Apply-Command($Command) {
       Invoke-RouterRest -Path "ip/hotspot/ip-binding/$encodedId" -Method Delete | Out-Null
     }
 
+    # Removing an IP binding alone can leave an already-connected HotSpot
+    # host using its cached bypass state. Evict that host when no other
+    # binding for the MAC remains, so the expired device must reauthorize.
+    $script:CurrentOperation = 'check for another paid-device binding before disconnect'
+    $remainingBindings = @(Get-RouterItems -Path 'ip/hotspot/ip-binding' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address','comment'))
+    $remainingBindings = @($remainingBindings | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac })
+    if ($remainingBindings.Count -eq 0) {
+      $script:CurrentOperation = 'find expired device in HotSpot host table'
+      $hosts = @(Get-RouterItems -Path 'ip/hotspot/host' -Filters @{ 'mac-address' = $mac } -Properties @('.id','mac-address'))
+      foreach ($hostEntry in ($hosts | Where-Object { (Normalize-Mac $_.'mac-address') -eq $mac })) {
+        $script:CurrentOperation = 'disconnect expired device from HotSpot'
+        $encodedId = [Uri]::EscapeDataString([string]$hostEntry.'.id')
+        Invoke-RouterRest -Path "ip/hotspot/host/$encodedId" -Method Delete | Out-Null
+      }
+    }
+
     # Also clean up entries created by the previous credential-based agent.
     $script:CurrentOperation = 'find active paid hotspot login to remove'
     $active = @(Get-RouterItems -Path 'ip/hotspot/active' -Filters @{ 'mac-address' = $mac; user = $Command.hotspot_username } -Properties @('.id','mac-address','user'))
